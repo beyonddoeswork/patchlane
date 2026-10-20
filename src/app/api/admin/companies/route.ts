@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
 import { adminAuth } from "@/lib/firebaseAdmin";
-import { sendDeveloperInviteEmail, sendDeveloperRemovalEmail } from "@/lib/mail";
+import { 
+  sendDeveloperInviteEmail, 
+  sendDeveloperRemovalEmail, 
+  sendPasswordResetNoticeEmail 
+} from "@/lib/mail";
 import crypto from "crypto";
-export const runtime = "nodejs";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
@@ -38,7 +42,20 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { action, companyName, ownerEmail, phone, projectSlug, developerEmail, role, reason } = body;
+    const { 
+      action, 
+      companyName, 
+      ownerEmail, 
+      phone, 
+      projectSlug, 
+      developerEmail, 
+      role, 
+      reason, 
+      targetEmail, 
+      customPassword, 
+      resetBy 
+    } = body;
+    
     const { db } = await connectToDatabase();
 
     // 1. Create client company
@@ -190,6 +207,45 @@ export async function POST(req: Request) {
         message: "Member removed and notified.",
         firebaseAccountDeleted 
       });
+    }
+
+    // 4. Reset User Password (by Manager or Super Admin)
+    if (action === "reset_password") {
+      if (!targetEmail) {
+        return NextResponse.json({ error: "Target email is required" }, { status: 400 });
+      }
+
+      const cleanEmail = targetEmail.toLowerCase().trim();
+
+      try {
+        const userRecord = await adminAuth.getUserByEmail(cleanEmail);
+        const newPassword = customPassword?.trim() || "Pch_" + crypto.randomBytes(4).toString("hex") + "!";
+
+        await adminAuth.updateUser(userRecord.uid, {
+          password: newPassword,
+        });
+
+        try {
+          await sendPasswordResetNoticeEmail({
+            to: cleanEmail,
+            newPassword,
+            resetBy: resetBy || "Agency Manager",
+          });
+        } catch (mailErr) {
+          console.error("Password reset notification email failed:", mailErr);
+        }
+
+        return NextResponse.json({
+          success: true,
+          message: `Password successfully updated for ${cleanEmail}`,
+          newPassword,
+        });
+      } catch (authErr: any) {
+        if (authErr.code === "auth/user-not-found") {
+          return NextResponse.json({ error: "No user found with that email." }, { status: 404 });
+        }
+        return NextResponse.json({ error: authErr.message || "Failed to reset password" }, { status: 500 });
+      }
     }
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });

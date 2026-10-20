@@ -22,8 +22,7 @@ import {
   UserX,
   MessageSquare,
   Send,
-  User,
-  Settings,
+  KeyRound,
   X
 } from "lucide-react";
 
@@ -98,6 +97,7 @@ export default function Dashboard() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showTeamModal, setShowTeamModal] = useState(false);
   const [showRemoveModal, setShowRemoveModal] = useState(false);
+  const [showPasswordResetModal, setShowPasswordResetModal] = useState(false);
 
   // Project Creation & Dev Invitation Fields
   const [newProjectName, setNewProjectName] = useState("");
@@ -109,6 +109,11 @@ export default function Dashboard() {
   const [memberToRemove, setMemberToRemove] = useState<string>("");
   const [removalReason, setRemovalReason] = useState("");
   const [isRemoving, setIsRemoving] = useState(false);
+
+  // Password reset state for manager
+  const [targetMemberEmail, setTargetMemberEmail] = useState("");
+  const [customNewPassword, setCustomNewPassword] = useState("");
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   const [isCreating, setIsCreating] = useState(false);
   const [isInviting, setIsInviting] = useState(false);
@@ -336,8 +341,14 @@ export default function Dashboard() {
           role: inviteDevRole,
         }),
       });
+
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new Error(`Server returned status ${res.status}.`);
+      }
+
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || "Failed to assign developer");
 
       setShowInviteModal(false);
       const invitedEmail = inviteDevEmail;
@@ -381,11 +392,43 @@ export default function Dashboard() {
       setRemovalReason("");
       setMemberToRemove("");
       await loadProjects();
-      alert(`Developer removed. Credentials cleaned up if no other projects remain, and email notification sent.`);
+      alert(`Developer removed. Credentials cleaned up if no other projects remain, and notification email sent.`);
     } catch (err: any) {
       alert(err.message || "Could not remove member");
     } finally {
       setIsRemoving(false);
+    }
+  };
+
+  const handleManagerPasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetMemberEmail) return;
+
+    setIsResettingPassword(true);
+    try {
+      const res = await fetch("/api/admin/companies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reset_password",
+          targetEmail: targetMemberEmail,
+          customPassword: customNewPassword || undefined,
+          resetBy: `${user?.email} (Project Lead)`,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to reset password");
+
+      setShowPasswordResetModal(false);
+      setCustomNewPassword("");
+      alert(
+        `Password reset for ${targetMemberEmail}!\nNew Password: ${data.newPassword}\n\nAn email with the updated credentials has been dispatched to the user.`
+      );
+    } catch (err: any) {
+      alert(err.message || "Failed to reset password.");
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
@@ -608,7 +651,7 @@ export default function Dashboard() {
                   <button
                     onClick={() => setShowTeamModal(true)}
                     className="inline-flex items-center gap-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-3 py-1.5 rounded-lg border border-slate-200 transition cursor-pointer"
-                    title="Manage team and remove members"
+                    title="Manage team, reset passwords and remove members"
                   >
                     <Users className="w-3.5 h-3.5 text-slate-500" />
                     <span>Manage Team</span>
@@ -928,7 +971,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Modal 2: Team Roster & Removal */}
+      {/* Modal 2: Team Roster & Removal & Password Reset */}
       {showTeamModal && activeProject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl border border-slate-200">
@@ -949,19 +992,37 @@ export default function Dashboard() {
                       <span className="text-[10px] uppercase font-bold text-slate-500">{dev.role}</span>
                     </div>
 
-                    {dev.role !== "owner" && dev.email.toLowerCase() !== user.email?.toLowerCase() && (
-                      <button
-                        onClick={() => {
-                          setMemberToRemove(dev.email);
-                          setShowTeamModal(false);
-                          setShowRemoveModal(true);
-                        }}
-                        className="text-xs text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-1 rounded flex items-center gap-1 transition cursor-pointer"
-                      >
-                        <UserX className="w-3.5 h-3.5" />
-                        <span>Remove</span>
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {/* Manager Password Reset Button */}
+                      {isProjectManager && (
+                        <button
+                          onClick={() => {
+                            setTargetMemberEmail(dev.email);
+                            setShowTeamModal(false);
+                            setShowPasswordResetModal(true);
+                          }}
+                          className="text-xs text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1 rounded flex items-center gap-1 transition cursor-pointer"
+                          title="Reset password for this teammate"
+                        >
+                          <KeyRound className="w-3.5 h-3.5" />
+                          <span>Reset Password</span>
+                        </button>
+                      )}
+
+                      {dev.role !== "owner" && dev.email.toLowerCase() !== user.email?.toLowerCase() && (
+                        <button
+                          onClick={() => {
+                            setMemberToRemove(dev.email);
+                            setShowTeamModal(false);
+                            setShowRemoveModal(true);
+                          }}
+                          className="text-xs text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-1 rounded flex items-center gap-1 transition cursor-pointer"
+                        >
+                          <UserX className="w-3.5 h-3.5" />
+                          <span>Remove</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))
               ) : (
@@ -1124,6 +1185,53 @@ export default function Dashboard() {
                   className="text-xs font-medium bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition disabled:opacity-50 cursor-pointer"
                 >
                   {isCreating ? "Creating..." : "Create Project"}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal 6: Manager Password Reset */}
+      {showPasswordResetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+            <h3 className="text-base font-bold text-slate-900 mb-1">Reset Teammate Password</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Reset login credentials for <strong className="text-slate-800">{targetMemberEmail}</strong>. A notification with the updated password will be emailed to them immediately.
+            </p>
+
+            <form onSubmit={handleManagerPasswordReset} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  New Password <span className="text-slate-400 font-normal">(Leave empty to auto-generate)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. SecurePass2026!"
+                  className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600 font-mono"
+                  value={customNewPassword}
+                  onChange={(e) => setCustomNewPassword(e.target.value)}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPasswordResetModal(false);
+                    setCustomNewPassword("");
+                  }}
+                  className="text-xs text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isResettingPassword}
+                  className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition disabled:opacity-50 cursor-pointer"
+                >
+                  {isResettingPassword ? "Updating & Emailing..." : "Confirm & Send Password"}
                 </button>
               </div>
             </form>

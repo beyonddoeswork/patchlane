@@ -213,3 +213,86 @@ export async function sendClientReportConfirmationEmail({
     html: htmlContent,
   });
 }
+
+// 4. Password Reset Notice Dispatcher
+interface PasswordResetNoticeOptions {
+  to: string;
+  newPassword?: string;
+  resetLink?: string;
+  resetBy: string;
+}
+
+export async function sendPasswordResetNoticeEmail({
+  to,
+  newPassword,
+  resetLink,
+  resetBy,
+}: PasswordResetNoticeOptions) {
+  const transporter = getTransporter();
+  const loginUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/login`;
+
+  const htmlContent = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 32px 24px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;">
+      <div style="margin-bottom: 24px;">
+        <span style="font-size: 24px; font-weight: 900; color: #0f172a; letter-spacing: -0.03em;">
+          Patchlane<span style="color: #4f46e5;">.</span>
+        </span>
+      </div>
+
+      <h2 style="font-size: 18px; font-weight: 700; color: #0f172a; margin-bottom: 12px;">
+        Your password has been reset
+      </h2>
+
+      <p style="font-size: 14px; color: #475569; line-height: 1.6; margin-bottom: 20px;">
+        A password reset for your account (<strong>${to}</strong>) was processed by your <strong>${resetBy}</strong>.
+      </p>
+
+      ${
+        newPassword
+          ? `
+        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+          <p style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-top: 0; margin-bottom: 8px;">
+            Your New Password
+          </p>
+          <div style="font-size: 13px; color: #1e293b; margin-bottom: 4px;">
+            <strong>Email:</strong> ${to}
+          </div>
+          <div style="font-size: 13px; color: #1e293b;">
+            <strong>Temporary Password:</strong> <code style="background-color: #e0e7ff; color: #3730a3; padding: 2px 6px; border-radius: 4px; font-weight: 600;">${newPassword}</code>
+          </div>
+        </div>
+        `
+          : ""
+      }
+
+      ${
+        resetLink
+          ? `
+        <div style="margin-bottom: 28px;">
+          <a href="${resetLink}" style="background-color: #4f46e5; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 600; padding: 12px 24px; border-radius: 8px; display: inline-block;">
+            Reset Your Password &rarr;
+          </a>
+        </div>
+        `
+          : `
+        <div style="margin-bottom: 28px;">
+          <a href="${loginUrl}" style="background-color: #4f46e5; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 600; padding: 12px 24px; border-radius: 8px; display: inline-block;">
+            Sign In with New Password &rarr;
+          </a>
+        </div>
+        `
+      }
+
+      <p style="font-size: 12px; color: #94a3b8; line-height: 1.5; margin: 0; border-top: 1px solid #f1f5f9; padding-top: 16px;">
+        If you did not expect this password reset, please contact your project manager or team admin immediately.
+      </p>
+    </div>
+  `;
+
+  await transporter.sendMail({
+    from: `"Patchlane Security" <${process.env.SMTP_USER}>`,
+    to,
+    subject: `Password Reset Notice: Patchlane Account`,
+    html: htmlContent,
+  });
+}

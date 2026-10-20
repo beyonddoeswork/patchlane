@@ -4,21 +4,19 @@ import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { 
   Building2, 
   Users, 
   FolderGit2, 
   Plus, 
   UserPlus, 
-  ShieldCheck, 
-  Mail, 
-  Phone, 
   ArrowLeft, 
   RefreshCw,
   Trash2,
   CheckCircle2,
-  Briefcase
+  ShieldAlert,
+  KeyRound
 } from "lucide-react";
 
 interface Company {
@@ -49,6 +47,7 @@ export default function AdminDashboard() {
   // Modal States
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
+  const [showAdminResetModal, setShowAdminResetModal] = useState(false);
   const [selectedProjectSlug, setSelectedProjectSlug] = useState("");
 
   // Form Fields
@@ -59,6 +58,17 @@ export default function AdminDashboard() {
   const [assignDevEmail, setAssignDevEmail] = useState("");
   const [assignDevRole, setAssignDevRole] = useState("developer");
   const [statusMessage, setStatusMessage] = useState("");
+
+  // Super Admin Password Override
+  const [adminResetEmail, setAdminResetEmail] = useState("");
+  const [adminNewPassword, setAdminNewPassword] = useState("");
+  const [isAdminResetting, setIsAdminResetting] = useState(false);
+
+  // Super Admin Check
+  const allowedAdmins = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase());
+  const isSuperAdmin = user?.email && allowedAdmins.includes(user.email.toLowerCase());
 
   const loadAdminData = useCallback(async () => {
     setIsLoading(true);
@@ -79,10 +89,43 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!loading && !user) {
       router.push("/login");
-    } else {
+    } else if (user && isSuperAdmin) {
       loadAdminData();
+    } else {
+      setIsLoading(false);
     }
-  }, [user, loading, router, loadAdminData]);
+  }, [user, loading, router, isSuperAdmin, loadAdminData]);
+
+  if (loading || isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <p className="text-sm font-semibold text-slate-500 animate-pulse">Checking credentials...</p>
+      </div>
+    );
+  }
+
+  // Access Denied Screen
+  if (!isSuperAdmin) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 text-center">
+        <div className="bg-white border border-slate-200 rounded-2xl p-8 max-w-md w-full shadow-sm">
+          <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-xl flex items-center justify-center mx-auto mb-4 border border-rose-100">
+            <ShieldAlert className="w-6 h-6" />
+          </div>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">Access Restricted</h2>
+          <p className="text-xs text-slate-600 leading-relaxed mb-6">
+            Your account (<strong className="text-slate-800">{user?.email}</strong>) does not have Super Admin permissions to access Patchlane Website Operations.
+          </p>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-5 py-2.5 rounded-lg transition w-full"
+          >
+            Return to Dashboard
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   // Onboard Client Company
   const handleCreateCompany = async (e: React.FormEvent) => {
@@ -161,13 +204,38 @@ export default function AdminDashboard() {
     }
   };
 
-  if (loading || isLoading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <p className="text-sm font-semibold text-slate-500 animate-pulse">Loading Patchlane Admin Operations...</p>
-      </div>
-    );
-  }
+  // Super Admin Password Override
+  const handleAdminPasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminResetEmail) return;
+
+    setIsAdminResetting(true);
+    try {
+      const res = await fetch("/api/admin/companies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reset_password",
+          targetEmail: adminResetEmail,
+          customPassword: adminNewPassword || undefined,
+          resetBy: "Patchlane Operations Super-Admin",
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to reset password");
+
+      setShowAdminResetModal(false);
+      setAdminResetEmail("");
+      setAdminNewPassword("");
+      setStatusMessage(`Password successfully reset for ${adminResetEmail}: ${data.newPassword}`);
+      setTimeout(() => setStatusMessage(""), 6000);
+    } catch (err: any) {
+      alert(err.message || "Failed to reset password");
+    } finally {
+      setIsAdminResetting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col selection:bg-indigo-600 selection:text-white">
@@ -193,14 +261,21 @@ export default function AdminDashboard() {
           <div className="flex items-center gap-3">
             <button
               onClick={loadAdminData}
-              className="text-xs text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 p-2 rounded-lg transition flex items-center gap-1"
+              className="text-xs text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 p-2 rounded-lg transition flex items-center gap-1 cursor-pointer"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Sync Data</span>
             </button>
             <button
+              onClick={() => setShowAdminResetModal(true)}
+              className="text-xs font-semibold bg-slate-900 hover:bg-black text-white px-3.5 py-2 rounded-lg transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>Reset Any Password</span>
+            </button>
+            <button
               onClick={() => setShowCompanyModal(true)}
-              className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-lg transition shadow-xs flex items-center gap-1.5"
+              className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-lg transition shadow-xs flex items-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Provision Company</span>
@@ -311,7 +386,7 @@ export default function AdminDashboard() {
                           {dev.role !== "owner" && (
                             <button
                               onClick={() => handleRemoveMember(proj.slug, dev.email)}
-                              className="text-slate-400 hover:text-rose-600 p-1 transition"
+                              className="text-slate-400 hover:text-rose-600 p-1 transition cursor-pointer"
                               title="Remove from project"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -408,13 +483,13 @@ export default function AdminDashboard() {
                 <button
                   type="button"
                   onClick={() => setShowCompanyModal(false)}
-                  className="text-xs text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-100 transition"
+                  className="text-xs text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-100 transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition"
+                  className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition cursor-pointer"
                 >
                   Confirm & Provision
                 </button>
@@ -457,15 +532,71 @@ export default function AdminDashboard() {
                 <button
                   type="button"
                   onClick={() => setShowAssignModal(false)}
-                  className="text-xs text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-100 transition"
+                  className="text-xs text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-100 transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition"
+                  className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition cursor-pointer"
                 >
                   Grant Project Access
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal 3: Super Admin Password Override */}
+      {showAdminResetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+            <h3 className="text-base font-bold text-slate-900 mb-1">Super Admin Password Override</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Reset credentials for any client, owner, or developer account on Patchlane.
+            </p>
+
+            <form onSubmit={handleAdminPasswordReset} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">User Email Address</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="target@anyagency.com"
+                  className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600"
+                  value={adminResetEmail}
+                  onChange={(e) => setAdminResetEmail(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  New Password <span className="text-slate-400 font-normal">(Leave blank to auto-generate)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Auto-generated if empty"
+                  className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600 font-mono"
+                  value={adminNewPassword}
+                  onChange={(e) => setAdminNewPassword(e.target.value)}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAdminResetModal(false)}
+                  className="text-xs text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isAdminResetting}
+                  className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition disabled:opacity-50 cursor-pointer"
+                >
+                  {isAdminResetting ? "Updating..." : "Override Password & Dispatch Email"}
                 </button>
               </div>
             </form>
