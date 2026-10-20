@@ -3,6 +3,7 @@ import { connectToDatabase } from "@/lib/mongodb";
 import { adminAuth } from "@/lib/firebaseAdmin";
 import { sendDeveloperInviteEmail, sendDeveloperRemovalEmail } from "@/lib/mail";
 import crypto from "crypto";
+export const runtime = "nodejs";
 
 export const dynamic = "force-dynamic";
 
