@@ -58,6 +58,11 @@ export async function POST(req: Request) {
     
     const { db } = await connectToDatabase();
 
+    // Dynamically detect the website domain from the incoming request
+    const originHeader = req.headers.get("origin");
+    const hostHeader = req.headers.get("host");
+    const requestAppUrl = originHeader || (hostHeader ? `https://${hostHeader}` : undefined);
+
     // 1. Create client company
     if (action === "create_company") {
       if (!ownerEmail || !companyName) {
@@ -137,6 +142,7 @@ export async function POST(req: Request) {
           role: memberRole,
           temporaryPassword,
           isExistingUser,
+          appUrl: requestAppUrl,
         });
       } catch (mailErr) {
         console.error("Invite email failed:", mailErr);
@@ -159,13 +165,11 @@ export async function POST(req: Request) {
       const cleanEmail = developerEmail.toLowerCase().trim();
       const targetProject = await db.collection("projects").findOne({ slug: projectSlug });
 
-      // Pull from the project roster
       await db.collection("projects").updateOne(
         { slug: projectSlug },
         { $pull: { assignedDevelopers: { email: cleanEmail } } as any }
       );
 
-      // Check if developer has active roles in any other project
       const otherProjectsCount = await db.collection("projects").countDocuments({
         $or: [
           { ownerEmail: cleanEmail },
@@ -175,7 +179,6 @@ export async function POST(req: Request) {
 
       let firebaseAccountDeleted = false;
 
-      // If no other projects, remove credentials from Firebase Auth
       if (otherProjectsCount === 0) {
         try {
           const userRecord = await adminAuth.getUserByEmail(cleanEmail);
@@ -188,7 +191,6 @@ export async function POST(req: Request) {
         }
       }
 
-      // Dispatch notification email with the specified reason
       if (targetProject) {
         try {
           await sendDeveloperRemovalEmail({
@@ -230,6 +232,7 @@ export async function POST(req: Request) {
             to: cleanEmail,
             newPassword,
             resetBy: resetBy || "Agency Manager",
+            appUrl: requestAppUrl,
           });
         } catch (mailErr) {
           console.error("Password reset notification email failed:", mailErr);

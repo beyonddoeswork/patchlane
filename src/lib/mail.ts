@@ -19,7 +19,24 @@ function getTransporter() {
   });
 }
 
-// 1. Existing Invite Dispatcher
+// Automatically resolve the current live URL
+export function getBaseUrl(explicitOrigin?: string | null) {
+  if (explicitOrigin && explicitOrigin.startsWith("http")) {
+    return explicitOrigin.replace(/\/$/, "");
+  }
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  }
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+  if (process.env.NEXT_PUBLIC_APP_URL && !process.env.NEXT_PUBLIC_APP_URL.includes("localhost")) {
+    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
+  }
+  return "http://localhost:3000";
+}
+
+// 1. Developer Invitation Email
 interface InviteMailOptions {
   to: string;
   projectName: string;
@@ -27,6 +44,7 @@ interface InviteMailOptions {
   role: string;
   temporaryPassword?: string;
   isExistingUser: boolean;
+  appUrl?: string;
 }
 
 export async function sendDeveloperInviteEmail({
@@ -36,9 +54,11 @@ export async function sendDeveloperInviteEmail({
   role,
   temporaryPassword,
   isExistingUser,
+  appUrl,
 }: InviteMailOptions) {
   const transporter = getTransporter();
-  const loginUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/login`;
+  const baseUrl = getBaseUrl(appUrl);
+  const loginUrl = `${baseUrl}/login`;
 
   const htmlContent = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 32px 24px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;">
@@ -220,6 +240,7 @@ interface PasswordResetNoticeOptions {
   newPassword?: string;
   resetLink?: string;
   resetBy: string;
+  appUrl?: string;
 }
 
 export async function sendPasswordResetNoticeEmail({
@@ -227,9 +248,11 @@ export async function sendPasswordResetNoticeEmail({
   newPassword,
   resetLink,
   resetBy,
+  appUrl,
 }: PasswordResetNoticeOptions) {
   const transporter = getTransporter();
-  const loginUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/login`;
+  const baseUrl = getBaseUrl(appUrl);
+  const loginUrl = `${baseUrl}/login`;
 
   const htmlContent = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 32px 24px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;">
