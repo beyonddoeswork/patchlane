@@ -123,18 +123,11 @@ export async function PATCH(req: Request) {
     const { db } = await connectToDatabase();
     const updateFields: any = { updatedAt: new Date() };
 
-    if (status) updateFields.status = status;
-    if (classification) {
-      updateFields.classification = classification;
-      if (classification === "Defect") {
-        updateFields["scopeApproval.isBillable"] = false;
-        updateFields["scopeApproval.approvalStatus"] = "none";
-      } else {
-        updateFields["scopeApproval.isBillable"] = true;
-      }
+    if (status) {
+      updateFields.status = status;
     }
 
-    // Trigger Out-of-Warranty Quote & Email Disptach
+    // 1. Dispatching Out-of-Warranty Quote & Approval Request
     if (requestApproval) {
       const currentReport = await db.collection("reports").findOne({ _id: new ObjectId(reportId) });
       if (!currentReport) {
@@ -145,11 +138,16 @@ export async function PATCH(req: Request) {
       const recipientEmail = (clientEmail || currentReport.clientEmail)?.trim();
 
       if (!recipientEmail || !recipientEmail.includes("@")) {
-        return NextResponse.json({ error: "A valid client email address is required to dispatch scope authorization." }, { status: 400 });
+        return NextResponse.json(
+          { error: "A valid client email address is required to dispatch scope authorization." },
+          { status: 400 }
+        );
       }
 
       updateFields.clientEmail = recipientEmail;
       updateFields.classification = "Scope Expansion";
+      
+      // Setting scopeApproval as one consolidated object eliminates the path conflict
       updateFields.scopeApproval = {
         isBillable: true,
         approvalStatus: "pending_review",
@@ -180,6 +178,22 @@ export async function PATCH(req: Request) {
       } catch (mailErr) {
         console.error("Scope authorization request email failed:", mailErr);
       }
+    } 
+    // 2. Standard Classification Switch (without sending quote)
+    else if (classification) {
+      updateFields.classification = classification;
+      
+      if (classification === "Defect") {
+        updateFields.scopeApproval = {
+          isBillable: false,
+          approvalStatus: "none",
+        };
+      } else {
+        updateFields.scopeApproval = {
+          isBillable: true,
+          approvalStatus: "none",
+        };
+      }
     }
 
     await db.collection("reports").updateOne(
@@ -189,6 +203,7 @@ export async function PATCH(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    console.error("PATCH error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
