@@ -2,282 +2,241 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import { 
-  CheckCircle2, 
-  ArrowRight, 
-  Phone, 
-  Briefcase, 
-  Lock, 
-  Mail, 
-  Zap, 
-  Layers
-} from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import { sendPasswordResetEmail } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import { ArrowLeft, KeyRound, Mail, Lock, CheckCircle2, AlertCircle } from "lucide-react";
+import { motion } from "framer-motion";
 
 export default function LoginPage() {
-  const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [agencyName, setAgencyName] = useState("");
-  const [phone, setPhone] = useState("");
-  
   const [error, setError] = useState("");
-  const [loadingAction, setLoadingAction] = useState(false);
-  const { login, signup } = useAuth();
+  const [loading, setLoading] = useState(false);
+
+  // Forgot Password In-Page Modal State
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetStatus, setResetStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [resetErrorMsg, setResetErrorMsg] = useState("");
+
+  const { login } = useAuth();
   const router = useRouter();
 
-  const handleAuth = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    setLoadingAction(true);
+    setLoading(true);
 
     try {
-      if (isRegister) {
-        // 1. Firebase Auth Registration
-        await signup(email, password);
-
-        // 2. Save Contact Info & Free Access to MongoDB
-        await fetch("/api/agency", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email,
-            agencyName,
-            phone,
-            plan: "free",
-          }),
-        });
-      } else {
-        await login(email, password);
-      }
+      await login(email, password);
       router.push("/dashboard");
     } catch (err: any) {
-      setError(err.message || "Authentication failed. Check your credentials.");
+      setError(
+        err.code === "auth/invalid-credential"
+          ? "Invalid email or password. You can reset your password below if needed."
+          : err.message || "Failed to log in."
+      );
     } finally {
-      setLoadingAction(false);
+      setLoading(false);
+    }
+  };
+
+  const handleSelfPasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail.trim()) return;
+
+    setResetStatus("loading");
+    setResetErrorMsg("");
+
+    try {
+      await sendPasswordResetEmail(auth, resetEmail.trim(), {
+        url: `${window.location.origin}/login`,
+        handleCodeInApp: true,
+      });
+      setResetStatus("success");
+    } catch (err: any) {
+      setResetStatus("error");
+      setResetErrorMsg(
+        err.code === "auth/user-not-found"
+          ? "No account found with this email."
+          : err.message || "Failed to dispatch reset email."
+      );
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col justify-between p-4 sm:p-6 selection:bg-indigo-500 selection:text-white">
-      {/* Top Bar with Clickable Logo */}
-      <div className="max-w-4xl w-full mx-auto py-2">
-        <Link 
-          href="/" 
-          className="inline-flex items-center gap-2 group transition"
-          title="Return to Home"
-        >
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-extrabold text-sm shadow-xs group-hover:bg-indigo-700 transition">
-            F
-          </div>
-          <span className="text-xl font-extrabold text-slate-900 tracking-tight">
+    <div className="min-h-screen bg-slate-50 flex flex-col justify-center items-center p-6 selection:bg-indigo-600 selection:text-white">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <Link href="/" className="font-black text-3xl tracking-tight text-slate-900 inline-block mb-3">
             Patchlane<span className="text-indigo-600">.</span>
-          </span>
-        </Link>
-      </div>
+          </Link>
+          <h2 className="text-xl font-bold text-slate-900">Sign in to Agency Console</h2>
+          <p className="text-xs text-slate-500 mt-1">Access your client bug workspaces and developer assignments</p>
+        </div>
 
-      {/* Main Authentication Card */}
-      <div className="flex-1 flex items-center justify-center my-6">
-        <motion.div 
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
-          className="w-full max-w-4xl bg-white border border-slate-200/90 rounded-2xl shadow-sm overflow-hidden grid grid-cols-1 md:grid-cols-5"
-        >
-          {/* Left Side: Agency Overview */}
-          <div className="md:col-span-2 bg-slate-50/70 p-8 border-b md:border-b-0 md:border-r border-slate-200/80 flex flex-col justify-between">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm">
+          {error && (
+            <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs p-3 rounded-xl mb-4 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <Link 
-                href="/" 
-                className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 mb-6 hover:bg-indigo-100 transition"
-              >
-                <Zap className="w-3.5 h-3.5 text-indigo-600" />
-                <span>Patchlane for Agencies</span>
-              </Link>
-
-              <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug mb-3">
-                Client reports your developers will actually read.
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed mb-6">
-                Skip unstructured messages and endless back-and-forth. Give your clients a clean, branded link that captures device context automatically.
-              </p>
-
-              <div className="space-y-3.5">
-                <div className="flex items-start gap-2.5 text-xs text-slate-700">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <span>Distinguish warranty defects from paid changes</span>
-                </div>
-                <div className="flex items-start gap-2.5 text-xs text-slate-700">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <span>Zero login friction for non-technical clients</span>
-                </div>
-                <div className="flex items-start gap-2.5 text-xs text-slate-700">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <span>Auto-captured screen size, OS & browser specs</span>
-                </div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Email Address</label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <input
+                  type="email"
+                  required
+                  placeholder="developer@agency.com"
+                  className="w-full text-xs pl-9 pr-3 py-2.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-600 bg-slate-50 focus:bg-white transition"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
               </div>
             </div>
 
-            <div className="mt-8 pt-6 border-t border-slate-200 text-[11px] text-slate-500 flex items-center gap-2">
-              <Layers className="w-3.5 h-3.5 text-slate-400" />
-              <span>Multi-project workspace included</span>
-            </div>
-          </div>
-
-          {/* Right Side: Form */}
-          <div className="md:col-span-3 p-8 bg-white flex flex-col justify-center">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-                  {isRegister ? "Create Agency Account" : "Agency Portal"}
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {isRegister 
-                    ? "Set up your workspace and invite your first client" 
-                    : "Access your active client project tickets"}
-                </p>
-              </div>
-              <span className="text-[11px] bg-slate-100 text-slate-600 border border-slate-200 px-2.5 py-1 rounded-full font-medium">
-                Free Access
-              </span>
-            </div>
-
-            {error && (
-              <motion.div 
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-rose-50 border border-rose-200 text-rose-700 text-xs p-3 rounded-lg mb-4"
-              >
-                {error}
-              </motion.div>
-            )}
-
-            <form onSubmit={handleAuth} className="space-y-3.5">
-              {/* Work Email */}
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Work Email
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                  <input 
-                    type="email"
-                    required 
-                    placeholder="developer@agency.com"
-                    className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 transition"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              {/* Password */}
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Password
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                  <input 
-                    type="password" 
-                    required
-                    placeholder="••••••••••••"
-                    className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 transition"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              {/* Extra Registration Inputs */}
-              <AnimatePresence>
-                {isRegister && (
-                  <motion.div 
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="space-y-3 pt-1"
+            <div>
+              <div className="flex justify-between items-center mb-1">
+                <label className="block text-xs font-semibold text-slate-700">Password</label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetEmail(email);
+                      setResetStatus("idle");
+                      setShowForgotModal(true);
+                    }}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium transition cursor-pointer"
                   >
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                          Agency / Studio Name
-                        </label>
-                        <div className="relative">
-                          <Briefcase className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                          <input 
-                            type="text"
-                            required={isRegister}
-                            placeholder="PixelCraft Studios"
-                            className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 transition"
-                            value={agencyName}
-                            onChange={(e) => setAgencyName(e.target.value)}
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                          WhatsApp / Contact
-                        </label>
-                        <div className="relative">
-                          <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                          <input 
-                            type="tel"
-                            required={isRegister}
-                            placeholder="+91 98765 43210"
-                            className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 transition"
-                            value={phone}
-                            onChange={(e) => setPhone(e.target.value)}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              <button 
-                type="submit" 
-                disabled={loadingAction}
-                className="w-full mt-4 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold py-2.5 rounded-lg shadow-sm transition flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
-              >
-                {loadingAction ? (
-                  "Processing..."
-                ) : isRegister ? (
-                  <>Create Free Account <ArrowRight className="w-4 h-4" /></>
-                ) : (
-                  "Sign In to Dashboard"
-                )}
-              </button>
-            </form>
-
-            {/* Toggle */}
-            <div className="mt-6 pt-4 border-t border-slate-100 text-center">
-              <p className="text-xs text-slate-500">
-                {isRegister ? "Already running Patchlane for your agency?" : "New agency or freelance team?"}{" "}
-                <button 
-                  type="button" 
-                  onClick={() => {
-                    setIsRegister(!isRegister);
-                    setError("");
-                  }}
-                  className="text-indigo-600 hover:text-indigo-700 font-semibold underline underline-offset-4 ml-1 cursor-pointer transition"
-                >
-                  {isRegister ? "Sign In" : "Register Agency"}
-                </button>
-              </p>
+                    Quick Reset
+                  </button>
+                  <span className="text-slate-300 text-xs">|</span>
+                  <Link
+                    href="/forgot-password"
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium transition"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
+              </div>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  className="w-full text-xs pl-9 pr-3 py-2.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-600 bg-slate-50 focus:bg-white transition"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
             </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold text-xs py-2.5 rounded-lg transition shadow-xs cursor-pointer"
+            >
+              {loading ? "Authenticating..." : "Sign In"}
+            </button>
+          </form>
+
+          <div className="mt-6 pt-4 border-t border-slate-100 text-center">
+            <p className="text-xs text-slate-400">
+              Assigned by an agency? Use the credentials emailed to you or{" "}
+              <Link href="/forgot-password" className="text-indigo-600 hover:underline">
+                reset your password
+              </Link>.
+            </p>
           </div>
-        </motion.div>
+        </div>
+
+        <div className="text-center mt-6">
+          <Link href="/" className="text-xs text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5 transition">
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Back to Patchlane Home</span>
+          </Link>
+        </div>
       </div>
 
-      {/* Footer */}
-      <footer className="text-center text-xs text-slate-400 py-2">
-        Patchlane &copy; Built for small web design & development agencies.
-      </footer>
+      {/* Quick Modal Fallback for in-page resets */}
+      {showForgotModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-200">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                <KeyRound className="w-4 h-4" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900">Reset Password</h3>
+            </div>
+
+            {resetStatus === "success" ? (
+              <div className="space-y-3 py-2">
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3 rounded-lg flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <span>
+                    A password reset link has been dispatched to <strong>{resetEmail}</strong>. Follow the instructions in the email.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotModal(false)}
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs py-2 rounded-lg transition cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleSelfPasswordReset} className="space-y-3.5 mt-3">
+                <p className="text-xs text-slate-500">
+                  Enter your account email and we'll dispatch a secure recovery link.
+                </p>
+
+                {resetStatus === "error" && (
+                  <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 p-2.5 rounded-lg">
+                    {resetErrorMsg}
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Your Email</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="name@agency.com"
+                    className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotModal(false)}
+                    className="text-xs text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={resetStatus === "loading"}
+                    className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition disabled:opacity-50 cursor-pointer"
+                  >
+                    {resetStatus === "loading" ? "Sending..." : "Send Reset Link"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
