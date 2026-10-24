@@ -115,7 +115,7 @@ export default function TermsPage() {
 
           <section className="border-t border-slate-100 pt-6">
             <p className="text-[11px] text-slate-400">
-              Questions regarding these Terms of Service should be directed to <span className="font-mono text-indigo-600">support@patchlane.app</span>.
+              Questions regarding these Terms of Service should be directed to <span className="font-mono text-indigo-600">patchlanee@gmail.com</span>.
             </p>
           </section>
         </div>

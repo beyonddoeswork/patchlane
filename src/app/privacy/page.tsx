@@ -83,7 +83,7 @@ export default function PrivacyPage() {
             <ul className="list-disc pl-5 space-y-1.5">
               <li><strong>Right of Access & Portability</strong>: You may export all project reports in machine-readable Markdown format at any time using the "Export Report" tool.</li>
               <li><strong>Right to Rectification</strong>: You can update your display name and title directly inside your profile settings.</li>
-              <li><strong>Right to Erasure ("Right to be Forgotten")</strong>: Project owners may delete projects and request complete account purging by emailing privacy@patchlane.app.</li>
+              <li><strong>Right to Erasure ("Right to be Forgotten")</strong>: Project owners may delete projects and request complete account purging by emailing patchlanee@gmail.com.</li>
             </ul>
           </section>
 
@@ -101,7 +101,7 @@ export default function PrivacyPage() {
 
           <section className="border-t border-slate-100 pt-6">
             <p className="text-[11px] text-slate-400">
-              For privacy requests or inquiries, reach out to our privacy officer at <span className="font-mono text-indigo-600">privacy@patchlane.app</span>.
+              For privacy requests or inquiries, reach out to our privacy officer at <span className="font-mono text-indigo-600">patchlanee@gmail.com</span>.
             </p>
           </section>
         </div>
