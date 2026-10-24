@@ -102,6 +102,9 @@ export default function Dashboard() {
   // Project Creation & Dev Invitation Fields
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectSlug, setNewProjectSlug] = useState("");
+  const [slugAvailable, setSlugAvailable] = useState<boolean | null>(null);
+  const [checkingSlug, setCheckingSlug] = useState(false);
+
   const [inviteDevEmail, setInviteDevEmail] = useState("");
   const [inviteDevRole, setInviteDevRole] = useState("developer");
 
@@ -130,6 +133,29 @@ export default function Dashboard() {
       router.push("/login");
     }
   }, [user, loading, router]);
+
+  // Real-time debounce check for slug availability
+  useEffect(() => {
+    if (!newProjectSlug.trim()) {
+      setSlugAvailable(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setCheckingSlug(true);
+      try {
+        const res = await fetch(`/api/projects?checkSlug=${encodeURIComponent(newProjectSlug)}`);
+        const data = await res.json();
+        setSlugAvailable(data.available);
+      } catch {
+        setSlugAvailable(null);
+      } finally {
+        setCheckingSlug(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [newProjectSlug]);
 
   // Load User Profile
   const loadProfile = useCallback(async () => {
@@ -297,7 +323,9 @@ export default function Dashboard() {
     const generatedSlug = (newProjectSlug || newProjectName)
       .toLowerCase()
       .trim()
-      .replace(/[^a-z0-9-_]/g, "-");
+      .replace(/[^a-z0-9-_]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "");
 
     try {
       const res = await fetch("/api/projects", {
@@ -316,6 +344,7 @@ export default function Dashboard() {
       setShowCreateModal(false);
       setNewProjectName("");
       setNewProjectSlug("");
+      setSlugAvailable(null);
       await loadProjects();
       setActiveProject(data.project);
     } catch (err: any) {
@@ -435,7 +464,7 @@ export default function Dashboard() {
   const handleDeleteProject = async () => {
     if (!activeProject || !user?.email) return;
     const confirmDelete = window.confirm(
-      `Are you sure you want to delete "${activeProject.name}"? All associated tickets will be deleted permanently.`
+      `Are you sure you want to delete "${activeProject.name}"? All associated tickets, messages, and the URL slug will be permanently deleted and freed.`
     );
     if (!confirmDelete) return;
 
@@ -627,7 +656,12 @@ export default function Dashboard() {
             )}
 
             <button
-              onClick={() => setShowCreateModal(true)}
+              onClick={() => {
+                setNewProjectName("");
+                setNewProjectSlug("");
+                setSlugAvailable(null);
+                setShowCreateModal(true);
+              }}
               className="inline-flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium px-2.5 py-1.5 rounded-lg border border-indigo-200 transition cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -993,7 +1027,6 @@ export default function Dashboard() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {/* Manager Password Reset Button */}
                       {isProjectManager && (
                         <button
                           onClick={() => {
@@ -1136,45 +1169,68 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Modal 5: Create Project */}
+      {/* Modal 5: Create Project with Live Slug Availability */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-slate-200">
             <h3 className="text-lg font-bold text-slate-900 mb-1">Create New Client Project</h3>
+            <p className="text-xs text-slate-500 mb-4">Each project gets a globally unique URL slug for client feedback intake.</p>
+            
             <form onSubmit={handleCreateProject} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">Project Name</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Acme Redesign"
+                  placeholder="e.g. Acme Studio"
                   className="w-full text-sm border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600"
                   value={newProjectName}
                   onChange={(e) => {
                     setNewProjectName(e.target.value);
-                    if (!newProjectSlug) {
-                      setNewProjectSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, "-"));
-                    }
+                    const generated = e.target.value
+                      .toLowerCase()
+                      .trim()
+                      .replace(/[^a-z0-9-_]/g, "-")
+                      .replace(/-+/g, "-")
+                      .replace(/^-|-$/g, "");
+                    setNewProjectSlug(generated);
                   }}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">URL Slug</label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700">URL Slug</label>
+                  {checkingSlug && <span className="text-[10px] text-slate-400">Checking availability...</span>}
+                  {!checkingSlug && slugAvailable === true && (
+                    <span className="text-[10px] text-emerald-600 font-semibold">✓ Available</span>
+                  )}
+                  {!checkingSlug && slugAvailable === false && (
+                    <span className="text-[10px] text-amber-600 font-semibold">⚠ Taken (Auto-suffix will be applied)</span>
+                  )}
+                </div>
                 <input
                   type="text"
                   required
-                  placeholder="acme-redesign"
+                  placeholder="acme-studio"
                   className="w-full text-sm font-mono border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600"
                   value={newProjectSlug}
                   onChange={(e) => setNewProjectSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, "-"))}
                 />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Client URL: <code className="text-indigo-600 font-mono">/report/{newProjectSlug || "slug"}</code>
+                </p>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowCreateModal(false)}
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setNewProjectName("");
+                    setNewProjectSlug("");
+                    setSlugAvailable(null);
+                  }}
                   className="text-xs font-medium text-slate-600 hover:bg-slate-100 px-3 py-2 rounded-lg transition cursor-pointer"
                 >
                   Cancel

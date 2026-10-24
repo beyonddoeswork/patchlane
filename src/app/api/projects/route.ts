@@ -1,23 +1,48 @@
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
-// Fetch all projects accessible by this user (as owner OR as assigned developer)
+// Helper to sanitize slug into URL-safe format
+function sanitizeSlug(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+// 1. GET: Fetch projects for an owner or check slug availability
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const userEmail = searchParams.get("ownerEmail");
+    const ownerEmail = searchParams.get("ownerEmail");
+    const checkSlug = searchParams.get("checkSlug");
 
-    if (!userEmail) {
-      return NextResponse.json({ error: "ownerEmail query parameter is required" }, { status: 400 });
-    }
-
-    const cleanEmail = userEmail.toLowerCase().trim();
     const { db } = await connectToDatabase();
 
-    // Query for projects where user is owner OR listed in assignedDevelopers
+    // Ensure unique index on slug exists in MongoDB
+    await db.collection("projects").createIndex({ slug: 1 }, { unique: true });
+
+    // Endpoint for real-time slug check
+    if (checkSlug) {
+      const cleanSlug = sanitizeSlug(checkSlug);
+      const existing = await db.collection("projects").findOne({ slug: cleanSlug });
+      return NextResponse.json({ 
+        slug: cleanSlug, 
+        available: !existing 
+      });
+    }
+
+    if (!ownerEmail) {
+      return NextResponse.json({ error: "ownerEmail is required" }, { status: 400 });
+    }
+
+    const cleanEmail = ownerEmail.toLowerCase().trim();
+
+    // Fetch projects where user is owner OR assigned developer
     const projects = await db
       .collection("projects")
       .find({
@@ -29,53 +54,62 @@ export async function GET(req: Request) {
       .sort({ createdAt: -1 })
       .toArray();
 
-    // Augment each project with the requesting user's resolved role
-    const sanitizedProjects = projects.map((p) => {
-      let role = "developer";
-      if (p.ownerEmail?.toLowerCase() === cleanEmail) {
-        role = "owner";
-      } else {
-        const found = p.assignedDevelopers?.find((dev: any) => dev.email?.toLowerCase() === cleanEmail);
-        if (found?.role) role = found.role;
-      }
+    return NextResponse.json({
+      projects: projects.map((p) => {
+        let currentUserRole: "owner" | "agency_admin" | "developer" = "developer";
+        if (p.ownerEmail?.toLowerCase() === cleanEmail) {
+          currentUserRole = "owner";
+        } else {
+          const dev = p.assignedDevelopers?.find(
+            (d: any) => d.email?.toLowerCase() === cleanEmail
+          );
+          if (dev?.role === "agency_admin") currentUserRole = "agency_admin";
+        }
 
-      return {
-        ...p,
-        id: p._id.toString(),
-        _id: p._id.toString(),
-        currentUserRole: role,
-      };
+        return {
+          id: p._id.toString(),
+          name: p.name,
+          slug: p.slug,
+          ownerEmail: p.ownerEmail,
+          currentUserRole,
+          assignedDevelopers: p.assignedDevelopers || [],
+          createdAt: p.createdAt,
+        };
+      }),
     });
-
-    return NextResponse.json({ projects: sanitizedProjects }, { status: 200 });
   } catch (error: any) {
-    console.error("MongoDB Project Fetch Error:", error);
     return NextResponse.json({ error: error.message || "Failed to fetch projects" }, { status: 500 });
   }
 }
 
-// Create a new project (Agency Owner)
+// 2. POST: Create Project with automatic collision resolution
 export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { name, slug, ownerEmail } = body;
 
-    if (!name || !slug || !ownerEmail) {
-      return NextResponse.json({ error: "Missing required fields (name, slug, ownerEmail)" }, { status: 400 });
+    if (!name || !ownerEmail) {
+      return NextResponse.json({ error: "Project name and owner email are required" }, { status: 400 });
     }
-
-    const cleanSlug = slug.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-    const cleanEmail = ownerEmail.toLowerCase().trim();
 
     const { db } = await connectToDatabase();
-    const existing = await db.collection("projects").findOne({ slug: cleanSlug });
-    if (existing) {
-      return NextResponse.json({ error: "A project with this link slug already exists" }, { status: 409 });
+    await db.collection("projects").createIndex({ slug: 1 }, { unique: true });
+
+    const baseSlug = sanitizeSlug(slug || name);
+    let finalSlug = baseSlug;
+    let counter = 1;
+
+    // Check if slug is already taken across all accounts
+    while (await db.collection("projects").findOne({ slug: finalSlug })) {
+      counter++;
+      finalSlug = `${baseSlug}-${counter}`; // e.g. c1 -> c1-2 -> c1-3
     }
 
+    const cleanEmail = ownerEmail.toLowerCase().trim();
+
     const newProject = {
-      name,
-      slug: cleanSlug,
+      name: name.trim(),
+      slug: finalSlug,
       ownerEmail: cleanEmail,
       assignedDevelopers: [
         {
@@ -85,17 +119,28 @@ export async function POST(req: Request) {
         },
       ],
       createdAt: new Date(),
+      updatedAt: new Date(),
     };
 
-    await db.collection("projects").insertOne(newProject);
-    return NextResponse.json({ success: true, project: newProject }, { status: 201 });
+    const result = await db.collection("projects").insertOne(newProject);
+
+    return NextResponse.json({
+      success: true,
+      project: {
+        id: result.insertedId.toString(),
+        ...newProject,
+        currentUserRole: "owner",
+      },
+    });
   } catch (error: any) {
-    console.error("MongoDB Project Creation Error:", error);
+    if (error.code === 11000) {
+      return NextResponse.json({ error: "A project with this URL slug already exists. Please pick another." }, { status: 409 });
+    }
     return NextResponse.json({ error: error.message || "Failed to create project" }, { status: 500 });
   }
 }
 
-// Delete a project
+// 3. DELETE: Delete Project and free the slug from MongoDB
 export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -103,24 +148,33 @@ export async function DELETE(req: Request) {
     const ownerEmail = searchParams.get("ownerEmail");
 
     if (!slug || !ownerEmail) {
-      return NextResponse.json({ error: "Missing slug or ownerEmail query parameter" }, { status: 400 });
+      return NextResponse.json({ error: "Project slug and owner email are required" }, { status: 400 });
     }
 
     const { db } = await connectToDatabase();
     const cleanEmail = ownerEmail.toLowerCase().trim();
 
-    // Verify ownership
+    // Verify ownership before deleting
     const project = await db.collection("projects").findOne({ slug, ownerEmail: cleanEmail });
+
     if (!project) {
-      return NextResponse.json({ error: "Only project owners can delete this project" }, { status: 403 });
+      return NextResponse.json({ error: "Project not found or unauthorized to delete" }, { status: 404 });
     }
 
-    await db.collection("projects").deleteOne({ slug, ownerEmail: cleanEmail });
+    // 1. Delete all reports linked to this project
     await db.collection("reports").deleteMany({ projectId: slug });
 
-    return NextResponse.json({ success: true }, { status: 200 });
+    // 2. Delete all chat messages linked to this project
+    await db.collection("project_messages").deleteMany({ projectSlug: slug });
+
+    // 3. Delete the project document (frees the unique slug in MongoDB)
+    await db.collection("projects").deleteOne({ _id: project._id });
+
+    return NextResponse.json({ 
+      success: true, 
+      message: `Project ${slug} and its resources have been deleted. Slug is now freed.` 
+    });
   } catch (error: any) {
-    console.error("MongoDB Project Deletion Error:", error);
     return NextResponse.json({ error: error.message || "Failed to delete project" }, { status: 500 });
   }
 }
