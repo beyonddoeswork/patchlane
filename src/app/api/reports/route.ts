@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
-import { sendClientReportConfirmationEmail } from "@/lib/mail";
+import { 
+  sendClientReportConfirmationEmail, 
+  sendScopeApprovalRequestEmail 
+} from "@/lib/mail";
+import { ObjectId } from "mongodb";
 
 export const dynamic = "force-dynamic";
 
@@ -22,12 +26,17 @@ export async function POST(req: Request) {
       expected: expected || "",
       actual: actual || "",
       url: url || "",
-      clientEmail: clientEmail || "",
+      clientEmail: clientEmail ? clientEmail.trim() : "",
       clientMeta: clientMeta || null,
       attachmentUrl: attachmentUrl || null,
       status: "Open",
       classification: "Defect", // Default: Defect (Warranty)
+      scopeApproval: {
+        isBillable: false,
+        approvalStatus: "none", // none | pending_review | approved | rejected
+      },
       createdAt: new Date(),
+      updatedAt: new Date(),
     };
 
     const result = await db.collection("reports").insertOne(newReport);
@@ -57,12 +66,28 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get("projectId");
+    const reportId = searchParams.get("reportId");
+
+    const { db } = await connectToDatabase();
+
+    // Fetch single report for sign-off review
+    if (reportId) {
+      const report = await db.collection("reports").findOne({ _id: new ObjectId(reportId) });
+      if (!report) {
+        return NextResponse.json({ error: "Report not found" }, { status: 404 });
+      }
+      return NextResponse.json({
+        report: {
+          ...report,
+          id: report._id.toString(),
+        },
+      });
+    }
 
     if (!projectId) {
       return NextResponse.json({ error: "projectId is required" }, { status: 400 });
     }
 
-    const { db } = await connectToDatabase();
     const reports = await db
       .collection("reports")
       .find({ projectId })
@@ -83,13 +108,79 @@ export async function GET(req: Request) {
 export async function PATCH(req: Request) {
   try {
     const body = await req.json();
-    const { reportId, status, classification } = body;
-    const { ObjectId } = require("mongodb");
-    const { db } = await connectToDatabase();
+    const { 
+      reportId, 
+      status, 
+      classification, 
+      requestApproval, 
+      amount, 
+      currency, 
+      hours, 
+      developerNotes, 
+      clientEmail 
+    } = body;
 
-    const updateFields: any = {};
+    const { db } = await connectToDatabase();
+    const updateFields: any = { updatedAt: new Date() };
+
     if (status) updateFields.status = status;
-    if (classification) updateFields.classification = classification;
+    if (classification) {
+      updateFields.classification = classification;
+      if (classification === "Defect") {
+        updateFields["scopeApproval.isBillable"] = false;
+        updateFields["scopeApproval.approvalStatus"] = "none";
+      } else {
+        updateFields["scopeApproval.isBillable"] = true;
+      }
+    }
+
+    // Trigger Out-of-Warranty Quote & Email Disptach
+    if (requestApproval) {
+      const currentReport = await db.collection("reports").findOne({ _id: new ObjectId(reportId) });
+      if (!currentReport) {
+        return NextResponse.json({ error: "Report not found" }, { status: 404 });
+      }
+
+      const project = await db.collection("projects").findOne({ slug: currentReport.projectId });
+      const recipientEmail = (clientEmail || currentReport.clientEmail)?.trim();
+
+      if (!recipientEmail || !recipientEmail.includes("@")) {
+        return NextResponse.json({ error: "A valid client email address is required to dispatch scope authorization." }, { status: 400 });
+      }
+
+      updateFields.clientEmail = recipientEmail;
+      updateFields.classification = "Scope Expansion";
+      updateFields.scopeApproval = {
+        isBillable: true,
+        approvalStatus: "pending_review",
+        estimate: {
+          amount: Number(amount) || 0,
+          currency: currency || "INR",
+          hoursEstimate: hours ? Number(hours) : undefined,
+          developerNotes: developerNotes || "",
+          quotedAt: new Date(),
+        },
+      };
+
+      const origin = req.headers.get("origin") || undefined;
+
+      try {
+        await sendScopeApprovalRequestEmail({
+          to: recipientEmail,
+          projectName: project?.name || currentReport.projectId,
+          projectSlug: currentReport.projectId,
+          ticketId: reportId,
+          ticketSummary: currentReport.summary,
+          amount: amount || 0,
+          currency: currency || "INR",
+          hours,
+          developerNotes,
+          appUrl: origin,
+        });
+      } catch (mailErr) {
+        console.error("Scope authorization request email failed:", mailErr);
+      }
+    }
 
     await db.collection("reports").updateOne(
       { _id: new ObjectId(reportId) },

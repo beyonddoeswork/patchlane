@@ -17,13 +17,18 @@ import {
   Copy, 
   Check, 
   Users, 
-  UserPlus,
-  ShieldCheck,
-  UserX,
-  MessageSquare,
-  Send,
-  KeyRound,
-  X
+  UserPlus, 
+  ShieldCheck, 
+  UserX, 
+  MessageSquare, 
+  Send, 
+  KeyRound, 
+  Activity, 
+  FileCheck, 
+  DollarSign, 
+  Clock, 
+  CheckCircle2, 
+  X 
 } from "lucide-react";
 
 interface ProjectMember {
@@ -99,6 +104,19 @@ export default function Dashboard() {
   const [showRemoveModal, setShowRemoveModal] = useState(false);
   const [showPasswordResetModal, setShowPasswordResetModal] = useState(false);
 
+  // Scope Expansion & Sign-Off Modals
+  const [showScopeModal, setShowScopeModal] = useState(false);
+  const [selectedReportForScope, setSelectedReportForScope] = useState<any>(null);
+  const [scopeAmount, setScopeAmount] = useState("");
+  const [scopeCurrency, setScopeCurrency] = useState("INR");
+  const [scopeHours, setScopeHours] = useState("");
+  const [scopeNotes, setScopeNotes] = useState("");
+  const [scopeClientEmail, setScopeClientEmail] = useState("");
+  const [isDispatchingScope, setIsDispatchingScope] = useState(false);
+
+  const [showAuditModal, setShowAuditModal] = useState(false);
+  const [activeAuditRecord, setActiveAuditRecord] = useState<any>(null);
+
   // Project Creation & Dev Invitation Fields
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectSlug, setNewProjectSlug] = useState("");
@@ -121,6 +139,7 @@ export default function Dashboard() {
   const [isCreating, setIsCreating] = useState(false);
   const [isInviting, setIsInviting] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [copyStatusSuccess, setCopyStatusSuccess] = useState(false);
 
   // Super Admin Check
   const superAdminList = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || "")
@@ -491,6 +510,14 @@ export default function Dashboard() {
     setTimeout(() => setCopySuccess(false), 2000);
   };
 
+  const copyStatusLink = () => {
+    if (!activeProject) return;
+    const link = `${window.location.origin}/report/${activeProject.slug}/status`;
+    navigator.clipboard.writeText(link);
+    setCopyStatusSuccess(true);
+    setTimeout(() => setCopyStatusSuccess(false), 2000);
+  };
+
   const downloadReportSummary = () => {
     if (!activeProject || reports.length === 0) {
       alert("No reports available to download.");
@@ -508,6 +535,9 @@ export default function Dashboard() {
       markdown += `- **Expected**: ${r.expected || "N/A"}\n`;
       markdown += `- **Actual**: ${r.actual || "N/A"}\n`;
       markdown += `- **Submitted By**: ${r.clientEmail || "Anonymous"}\n`;
+      if (r.scopeApproval?.signOff) {
+        markdown += `- **Scope Sign-off**: Approved by ${r.scopeApproval.signOff.clientName} (${r.scopeApproval.signOff.clientEmail}) on ${new Date(r.scopeApproval.signOff.signedAt).toLocaleString()} (Audit Hash: ${r.scopeApproval.signOff.auditToken})\n`;
+      }
       if (r.clientMeta) {
         markdown += `- **Client Specs**: Resolution: ${r.clientMeta.screenResolution}, Viewport: ${r.clientMeta.viewport}\n`;
       }
@@ -536,14 +566,63 @@ export default function Dashboard() {
     });
   };
 
-  const toggleWorkType = async (reportId: string, currentType: string) => {
-    const nextType = currentType === "Scope Expansion" ? "Defect" : "Scope Expansion";
-    setReports((prev) => prev.map((r) => (r.id === reportId ? { ...r, classification: nextType } : r)));
-    await fetch("/api/reports", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reportId, classification: nextType }),
-    });
+  const toggleWorkType = async (report: any) => {
+    if (report.classification === "Defect") {
+      setSelectedReportForScope(report);
+      setScopeClientEmail(report.clientEmail || "");
+      setScopeAmount(report.scopeApproval?.estimate?.amount || "");
+      setScopeCurrency(report.scopeApproval?.estimate?.currency || "INR");
+      setScopeHours(report.scopeApproval?.estimate?.hoursEstimate || "");
+      setScopeNotes(report.scopeApproval?.estimate?.developerNotes || "");
+      setShowScopeModal(true);
+    } else {
+      setReports((prev) =>
+        prev.map((r) =>
+          r.id === report.id
+            ? { ...r, classification: "Defect", scopeApproval: { isBillable: false, approvalStatus: "none" } }
+            : r
+        )
+      );
+      await fetch("/api/reports", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportId: report.id, classification: "Defect" }),
+      });
+    }
+  };
+
+  const handleSendScopeQuote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedReportForScope || !scopeAmount || !scopeClientEmail) return;
+
+    setIsDispatchingScope(true);
+    try {
+      const res = await fetch("/api/reports", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reportId: selectedReportForScope.id,
+          classification: "Scope Expansion",
+          requestApproval: true,
+          amount: scopeAmount,
+          currency: scopeCurrency,
+          hours: scopeHours || undefined,
+          developerNotes: scopeNotes,
+          clientEmail: scopeClientEmail,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to dispatch scope authorization request");
+
+      setShowScopeModal(false);
+      await fetchReports();
+      alert(`Scope authorization quote emailed to ${scopeClientEmail}! Client can now digitally sign it.`);
+    } catch (err: any) {
+      alert(err.message || "Failed to dispatch scope authorization");
+    } finally {
+      setIsDispatchingScope(false);
+    }
   };
 
   if (loading || !user) {
@@ -670,7 +749,7 @@ export default function Dashboard() {
           </div>
 
           {activeProject && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center flex-wrap gap-2">
               {isProjectManager && (
                 <>
                   <button
@@ -693,12 +772,14 @@ export default function Dashboard() {
                 </>
               )}
 
+              {/* Copy Report Portal Link */}
               <button
                 onClick={copyClientLink}
                 className="inline-flex items-center gap-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-medium transition cursor-pointer"
+                title="Copy client bug intake link"
               >
                 {copySuccess ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copySuccess ? "Link Copied!" : "Copy Client Link"}</span>
+                <span>{copySuccess ? "Link Copied!" : "Copy Report Link"}</span>
               </button>
 
               <a
@@ -706,9 +787,31 @@ export default function Dashboard() {
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 p-1.5"
+                title="Open client report page in new tab"
               >
                 <ExternalLink className="w-4 h-4" />
               </a>
+
+              {/* Client Public Status Board & Changelog Link */}
+              <div className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 overflow-hidden">
+                <a
+                  href={`/report/${activeProject.slug}/status`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs hover:bg-slate-200 text-slate-700 px-3 py-1.5 font-medium transition cursor-pointer"
+                  title="View public client status board"
+                >
+                  <Activity className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Client Status</span>
+                </a>
+                <button
+                  onClick={copyStatusLink}
+                  className="px-2 py-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-200 border-l border-slate-200 transition cursor-pointer"
+                  title="Copy client status link to clipboard"
+                >
+                  {copyStatusSuccess ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                </button>
+              </div>
 
               <button
                 onClick={downloadReportSummary}
@@ -722,6 +825,7 @@ export default function Dashboard() {
                 <button
                   onClick={handleDeleteProject}
                   className="inline-flex items-center gap-1.5 text-xs bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 p-1.5 rounded-lg transition cursor-pointer"
+                  title="Delete project"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -754,83 +858,161 @@ export default function Dashboard() {
 
           <div className="grid grid-cols-1 gap-4">
             <AnimatePresence>
-              {reports.map((report) => (
-                <motion.div
-                  key={report.id}
-                  layout
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm"
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
-                    <div>
-                      <span className="text-xs font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded mr-2">
-                        {report.url || "General"}
-                      </span>
-                      <span className="font-semibold text-slate-900 text-sm">{report.summary}</span>
-                      {report.clientEmail && (
-                        <span className="text-xs text-slate-400 ml-2">from {report.clientEmail}</span>
-                      )}
-                    </div>
+              {reports.map((report) => {
+                const isBillable = report.classification === "Scope Expansion";
+                const approvalState = report.scopeApproval?.approvalStatus || "none";
+                const isApproved = approvalState === "approved";
+                const isPending = approvalState === "pending_review";
 
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={report.status || "Open"}
-                        onChange={(e) => updateStatus(report.id, e.target.value)}
-                        className={`text-xs font-medium border rounded-lg px-2.5 py-1 outline-none cursor-pointer transition shadow-xs ${getStatusStyles(
-                          report.status || "Open"
-                        )}`}
-                      >
-                        <option value="Open">Open</option>
-                        <option value="In Progress">In Progress</option>
-                        <option value="Fixed">Fixed</option>
-                      </select>
-
-                      <button
-                        onClick={() => toggleWorkType(report.id, report.classification)}
-                        className={`text-xs font-medium px-3 py-1 rounded-lg border transition shadow-xs cursor-pointer ${getClassificationStyles(
-                          report.classification
-                        )}`}
-                      >
-                        {report.classification === "Scope Expansion" ? "Scope Expansion (Billable)" : "Defect (Warranty)"}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-3 text-xs text-slate-600">
-                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                      <span className="font-semibold text-slate-700 block mb-1">Expected:</span>
-                      <p className="whitespace-pre-wrap">{report.expected || "N/A"}</p>
-                    </div>
-                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                      <span className="font-semibold text-slate-700 block mb-1">Actual:</span>
-                      <p className="whitespace-pre-wrap">{report.actual || "N/A"}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-100 gap-2">
-                    <div className="flex items-center gap-3">
-                      {report.clientMeta && (
-                        <span className="flex items-center gap-1">
-                          <Smartphone className="w-3.5 h-3.5" />
-                          Screen: {report.clientMeta.screenResolution} ({report.clientMeta.viewport})
+                return (
+                  <motion.div
+                    key={report.id}
+                    layout
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
+                      <div>
+                        <span className="text-xs font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded mr-2">
+                          {report.url || "General"}
                         </span>
+                        <span className="font-semibold text-slate-900 text-sm">{report.summary}</span>
+                        {report.clientEmail && (
+                          <span className="text-xs text-slate-400 ml-2">from {report.clientEmail}</span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center flex-wrap gap-2">
+                        <select
+                          value={report.status || "Open"}
+                          onChange={(e) => updateStatus(report.id, e.target.value)}
+                          className={`text-xs font-medium border rounded-lg px-2.5 py-1 outline-none cursor-pointer transition shadow-xs ${getStatusStyles(
+                            report.status || "Open"
+                          )}`}
+                        >
+                          <option value="Open">Open</option>
+                          <option value="In Progress">In Progress</option>
+                          <option value="Fixed">Fixed</option>
+                        </select>
+
+                        <button
+                          onClick={() => toggleWorkType(report)}
+                          className={`text-xs font-medium px-3 py-1 rounded-lg border transition shadow-xs cursor-pointer ${getClassificationStyles(
+                            report.classification
+                          )}`}
+                        >
+                          {isBillable ? "Scope Expansion (Billable)" : "Defect (Warranty)"}
+                        </button>
+
+                        {/* Billable Approval Badge & Triggers */}
+                        {isBillable && (
+                          <>
+                            {isApproved ? (
+                              <button
+                                onClick={() => {
+                                  setActiveAuditRecord(report.scopeApproval.signOff);
+                                  setShowAuditModal(true);
+                                }}
+                                className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                                title="Click to inspect digital signature audit proof"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Authorized ({report.scopeApproval?.estimate?.currency === "INR" ? "₹" : "$"}{report.scopeApproval?.estimate?.amount})</span>
+                              </button>
+                            ) : isPending ? (
+                              <button
+                                onClick={() => {
+                                  setSelectedReportForScope(report);
+                                  setScopeClientEmail(report.clientEmail || "");
+                                  setScopeAmount(report.scopeApproval?.estimate?.amount || "");
+                                  setScopeCurrency(report.scopeApproval?.estimate?.currency || "INR");
+                                  setScopeHours(report.scopeApproval?.estimate?.hoursEstimate || "");
+                                  setScopeNotes(report.scopeApproval?.estimate?.developerNotes || "");
+                                  setShowScopeModal(true);
+                                }}
+                                className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                                title="Re-quote or resend authorization link"
+                              >
+                                <Clock className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+                                <span>Pending Sign-Off</span>
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setSelectedReportForScope(report);
+                                  setScopeClientEmail(report.clientEmail || "");
+                                  setScopeAmount("");
+                                  setScopeCurrency("INR");
+                                  setScopeHours("");
+                                  setScopeNotes("");
+                                  setShowScopeModal(true);
+                                }}
+                                className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                              >
+                                <FileCheck className="w-3.5 h-3.5 text-indigo-600" />
+                                <span>Dispatch Quote</span>
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-3 text-xs text-slate-600">
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        <span className="font-semibold text-slate-700 block mb-1">Expected:</span>
+                        <p className="whitespace-pre-wrap">{report.expected || "N/A"}</p>
+                      </div>
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        <span className="font-semibold text-slate-700 block mb-1">Actual:</span>
+                        <p className="whitespace-pre-wrap">{report.actual || "N/A"}</p>
+                      </div>
+                    </div>
+
+                    {/* Scope Estimate Box if Billable */}
+                    {isBillable && report.scopeApproval?.estimate && (
+                      <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-3 text-xs text-slate-700 mb-3 space-y-1">
+                        <div className="flex items-center justify-between font-semibold">
+                          <span className="text-blue-900 flex items-center gap-1">
+                            <DollarSign className="w-3.5 h-3.5 text-blue-600" />
+                            Quoted Fee: {report.scopeApproval.estimate.currency === "INR" ? "₹" : "$"}{report.scopeApproval.estimate.amount}
+                            {report.scopeApproval.estimate.hoursEstimate ? ` (${report.scopeApproval.estimate.hoursEstimate} hrs)` : ""}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            Status: {isApproved ? "Approved by Client" : "Awaiting Signature"}
+                          </span>
+                        </div>
+                        {report.scopeApproval.estimate.developerNotes && (
+                          <p className="text-[11px] text-slate-600 italic">"{report.scopeApproval.estimate.developerNotes}"</p>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-100 gap-2">
+                      <div className="flex items-center gap-3">
+                        {report.clientMeta && (
+                          <span className="flex items-center gap-1">
+                            <Smartphone className="w-3.5 h-3.5" />
+                            Screen: {report.clientMeta.screenResolution} ({report.clientMeta.viewport})
+                          </span>
+                        )}
+                      </div>
+                      {report.attachmentUrl && (
+                        <a
+                          href={report.attachmentUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-indigo-600 font-medium hover:underline inline-flex items-center gap-1"
+                        >
+                          View Attached Screenshot
+                        </a>
                       )}
                     </div>
-                    {report.attachmentUrl && (
-                      <a
-                        href={report.attachmentUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-indigo-600 font-medium hover:underline inline-flex items-center gap-1"
-                      >
-                        View Attached Screenshot
-                      </a>
-                    )}
-                  </div>
-                </motion.div>
-              ))}
+                  </motion.div>
+                );
+              })}
             </AnimatePresence>
 
             {reports.length === 0 && (
@@ -853,7 +1035,6 @@ export default function Dashboard() {
               transition={{ duration: 0.25 }}
               className="w-84 sm:w-96 bg-white border-l border-slate-200 shadow-xl flex flex-col z-20 h-[calc(100vh-105px)] sticky top-[105px]"
             >
-              {/* Chat Header */}
               <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
@@ -870,7 +1051,6 @@ export default function Dashboard() {
                 </button>
               </div>
 
-              {/* Chat Messages */}
               <div className="flex-1 p-4 overflow-y-auto space-y-3.5 bg-slate-50/30">
                 {messages.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 text-xs">
@@ -916,7 +1096,6 @@ export default function Dashboard() {
                 <div ref={chatScrollRef} />
               </div>
 
-              {/* Message Input Box */}
               <form onSubmit={handleSendMessage} className="p-3 border-t border-slate-200 bg-white flex items-center gap-2">
                 <input
                   type="text"
@@ -938,12 +1117,12 @@ export default function Dashboard() {
         </AnimatePresence>
       </div>
 
-      {/* Modal 1: Edit User Profile */}
+      {/* Modal 1: Developer Profile */}
       {showProfileModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-200">
             <h3 className="text-base font-bold text-slate-900 mb-1">Developer Profile</h3>
-            <p className="text-xs text-slate-500 mb-4">Update your display information shown to your teammates in project chats.</p>
+            <p className="text-xs text-slate-500 mb-4">Update your display information shown in project chats.</p>
 
             <form onSubmit={handleSaveProfile} className="space-y-3.5">
               <div>
@@ -1005,7 +1184,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Modal 2: Team Roster & Removal & Password Reset */}
+      {/* Modal 2: Team Roster & Removal */}
       {showTeamModal && activeProject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl border border-slate-200">
@@ -1291,6 +1470,173 @@ export default function Dashboard() {
                 </button>
               </div>
             </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal 7: Out-of-Warranty Scope Quote Dispatch */}
+      {showScopeModal && selectedReportForScope && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                <FileCheck className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Authorize Scope Expansion</h3>
+                <p className="text-[11px] text-slate-500">Provide price estimate and trigger client digital signature</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-3 my-3">
+              Item: <strong className="text-slate-900">"{selectedReportForScope.summary}"</strong>
+            </p>
+
+            <form onSubmit={handleSendScopeQuote} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Client Decision-Maker Email</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="client@clientcompany.com"
+                  className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600"
+                  value={scopeClientEmail}
+                  onChange={(e) => setScopeClientEmail(e.target.value)}
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Quote Amount</label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    placeholder="e.g. 15000 or 250"
+                    className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600"
+                    value={scopeAmount}
+                    onChange={(e) => setScopeAmount(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Currency</label>
+                  <select
+                    value={scopeCurrency}
+                    onChange={(e) => setScopeCurrency(e.target.value)}
+                    className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none bg-white cursor-pointer"
+                  >
+                    <option value="INR">INR (₹)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (€)</option>
+                    <option value="GBP">GBP (£)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Estimated Hours <span className="text-slate-400 font-normal">(Optional)</span>
+                </label>
+                <input
+                  type="number"
+                  step="0.5"
+                  placeholder="e.g. 4.5"
+                  className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600"
+                  value={scopeHours}
+                  onChange={(e) => setScopeHours(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Scope Explanation & Deliverables</label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="e.g. Custom multi-currency checkout integration requested outside baseline warranty scope."
+                  className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600"
+                  value={scopeNotes}
+                  onChange={(e) => setScopeNotes(e.target.value)}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowScopeModal(false)}
+                  className="text-xs text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isDispatchingScope}
+                  className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition disabled:opacity-50 cursor-pointer"
+                >
+                  {isDispatchingScope ? "Dispatching..." : "Send Authorization Request"}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal 8: Digital Audit Signature Inspection */}
+      {showAuditModal && activeAuditRecord && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Digital Sign-Off Audit Record</h3>
+                <p className="text-[11px] text-slate-500">Legal proof of scope and fee acceptance</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5 text-xs text-slate-700">
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Authorized Signer</span>
+                <span className="font-semibold text-slate-900">{activeAuditRecord.clientName}</span>
+              </div>
+
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Signer Contact</span>
+                <span className="font-mono text-slate-800">{activeAuditRecord.clientEmail} • {activeAuditRecord.clientPhone}</span>
+              </div>
+
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Execution Timestamp</span>
+                <span className="font-mono text-slate-800">{new Date(activeAuditRecord.signedAt).toLocaleString()}</span>
+              </div>
+
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">IP Address & Network Signature</span>
+                <span className="font-mono text-slate-800">{activeAuditRecord.ipAddress}</span>
+              </div>
+
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Declaration Accepted</span>
+                <span className="italic text-slate-600">"{activeAuditRecord.declaration}"</span>
+              </div>
+
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">SHA-256 Audit Validation Hash</span>
+                <span className="font-mono text-[9px] break-all bg-white border border-slate-200 p-1.5 rounded block text-indigo-700">
+                  {activeAuditRecord.auditToken}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-4">
+              <button
+                type="button"
+                onClick={() => setShowAuditModal(false)}
+                className="text-xs font-semibold bg-slate-900 hover:bg-black text-white px-4 py-2 rounded-lg transition cursor-pointer"
+              >
+                Close Audit Proof
+              </button>
+            </div>
           </motion.div>
         </div>
       )}
