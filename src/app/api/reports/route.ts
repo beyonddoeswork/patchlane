@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { projectId, summary, expected, actual, url, clientEmail, clientMeta, attachmentUrl } = body;
+    const { projectId, accessCode, summary, expected, actual, url, clientEmail, clientMeta, attachmentUrl } = body;
 
     if (!projectId || !summary) {
       return NextResponse.json({ error: "Missing project ID or summary" }, { status: 400 });
@@ -19,6 +19,19 @@ export async function POST(req: Request) {
 
     const { db } = await connectToDatabase();
     const project = await db.collection("projects").findOne({ slug: projectId });
+
+    if (!project) {
+      return NextResponse.json({ error: "Project workspace not found" }, { status: 404 });
+    }
+
+    if (project.accessCode) {
+      if (!accessCode || accessCode.trim().toUpperCase() !== project.accessCode.toUpperCase()) {
+        return NextResponse.json(
+          { error: "Invalid or missing project access code. Please re-verify your code." },
+          { status: 401 }
+        );
+      }
+    }
 
     const newReport = {
       projectId,
@@ -30,10 +43,10 @@ export async function POST(req: Request) {
       clientMeta: clientMeta || null,
       attachmentUrl: attachmentUrl || null,
       status: "Open",
-      classification: "Defect", // Default: Defect (Warranty)
+      classification: "Defect",
       scopeApproval: {
         isBillable: false,
-        approvalStatus: "none", // none | pending_review | approved | rejected
+        approvalStatus: "none",
       },
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -41,7 +54,6 @@ export async function POST(req: Request) {
 
     const result = await db.collection("reports").insertOne(newReport);
 
-    // Send confirmation email to client if an email was provided
     if (clientEmail && clientEmail.includes("@")) {
       try {
         await sendClientReportConfirmationEmail({
@@ -70,7 +82,6 @@ export async function GET(req: Request) {
 
     const { db } = await connectToDatabase();
 
-    // Fetch single report for sign-off review
     if (reportId) {
       const report = await db.collection("reports").findOne({ _id: new ObjectId(reportId) });
       if (!report) {
@@ -127,7 +138,6 @@ export async function PATCH(req: Request) {
       updateFields.status = status;
     }
 
-    // 1. Dispatching Out-of-Warranty Quote & Approval Request
     if (requestApproval) {
       const currentReport = await db.collection("reports").findOne({ _id: new ObjectId(reportId) });
       if (!currentReport) {
@@ -146,8 +156,6 @@ export async function PATCH(req: Request) {
 
       updateFields.clientEmail = recipientEmail;
       updateFields.classification = "Scope Expansion";
-      
-      // Setting scopeApproval as one consolidated object eliminates the path conflict
       updateFields.scopeApproval = {
         isBillable: true,
         approvalStatus: "pending_review",
@@ -178,11 +186,8 @@ export async function PATCH(req: Request) {
       } catch (mailErr) {
         console.error("Scope authorization request email failed:", mailErr);
       }
-    } 
-    // 2. Standard Classification Switch (without sending quote)
-    else if (classification) {
+    } else if (classification) {
       updateFields.classification = classification;
-      
       if (classification === "Defect") {
         updateFields.scopeApproval = {
           isBillable: false,

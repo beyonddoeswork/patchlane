@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
+import crypto from "crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Helper to sanitize slug into URL-safe format
 function sanitizeSlug(text: string): string {
   return text
     .toLowerCase()
@@ -14,25 +14,66 @@ function sanitizeSlug(text: string): string {
     .replace(/^-|-$/g, "");
 }
 
-// 1. GET: Fetch projects for an owner or check slug availability
+function generateAccessCode(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  const randomBytes = crypto.randomBytes(6);
+  for (let i = 0; i < 6; i++) {
+    code += chars[randomBytes[i] % chars.length];
+  }
+  return code;
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const ownerEmail = searchParams.get("ownerEmail");
     const checkSlug = searchParams.get("checkSlug");
+    const verifySlug = searchParams.get("verifySlug");
+    const code = searchParams.get("code");
 
     const { db } = await connectToDatabase();
-
-    // Ensure unique index on slug exists in MongoDB
     await db.collection("projects").createIndex({ slug: 1 }, { unique: true });
 
-    // Endpoint for real-time slug check
+    if (verifySlug) {
+      const project = await db.collection("projects").findOne({ slug: verifySlug });
+      if (!project) {
+        return NextResponse.json({ valid: false, error: "Project workspace not found" }, { status: 404 });
+      }
+
+      let activeCode = project.accessCode;
+      if (!activeCode) {
+        activeCode = generateAccessCode();
+        await db.collection("projects").updateOne(
+          { _id: project._id },
+          { $set: { accessCode: activeCode } }
+        );
+      }
+
+      if (!code) {
+        return NextResponse.json({
+          requiresCode: true,
+          projectName: project.name,
+        });
+      }
+
+      const isValid = code.trim().toUpperCase() === activeCode.toUpperCase();
+      if (!isValid) {
+        return NextResponse.json({ valid: false, error: "Invalid access code" }, { status: 401 });
+      }
+
+      return NextResponse.json({
+        valid: true,
+        projectName: project.name,
+      });
+    }
+
     if (checkSlug) {
       const cleanSlug = sanitizeSlug(checkSlug);
       const existing = await db.collection("projects").findOne({ slug: cleanSlug });
-      return NextResponse.json({ 
-        slug: cleanSlug, 
-        available: !existing 
+      return NextResponse.json({
+        slug: cleanSlug,
+        available: !existing,
       });
     }
 
@@ -42,7 +83,6 @@ export async function GET(req: Request) {
 
     const cleanEmail = ownerEmail.toLowerCase().trim();
 
-    // Fetch projects where user is owner OR assigned developer
     const projects = await db
       .collection("projects")
       .find({
@@ -54,8 +94,8 @@ export async function GET(req: Request) {
       .sort({ createdAt: -1 })
       .toArray();
 
-    return NextResponse.json({
-      projects: projects.map((p) => {
+    const formattedProjects = await Promise.all(
+      projects.map(async (p) => {
         let currentUserRole: "owner" | "agency_admin" | "developer" = "developer";
         if (p.ownerEmail?.toLowerCase() === cleanEmail) {
           currentUserRole = "owner";
@@ -66,23 +106,34 @@ export async function GET(req: Request) {
           if (dev?.role === "agency_admin") currentUserRole = "agency_admin";
         }
 
+        let accessCode = p.accessCode;
+        if (!accessCode) {
+          accessCode = generateAccessCode();
+          await db.collection("projects").updateOne(
+            { _id: p._id },
+            { $set: { accessCode } }
+          );
+        }
+
         return {
           id: p._id.toString(),
           name: p.name,
           slug: p.slug,
+          accessCode,
           ownerEmail: p.ownerEmail,
           currentUserRole,
           assignedDevelopers: p.assignedDevelopers || [],
           createdAt: p.createdAt,
         };
-      }),
-    });
+      })
+    );
+
+    return NextResponse.json({ projects: formattedProjects });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Failed to fetch projects" }, { status: 500 });
   }
 }
 
-// 2. POST: Create Project with automatic collision resolution
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -99,17 +150,18 @@ export async function POST(req: Request) {
     let finalSlug = baseSlug;
     let counter = 1;
 
-    // Check if slug is already taken across all accounts
     while (await db.collection("projects").findOne({ slug: finalSlug })) {
       counter++;
-      finalSlug = `${baseSlug}-${counter}`; // e.g. c1 -> c1-2 -> c1-3
+      finalSlug = `${baseSlug}-${counter}`;
     }
 
     const cleanEmail = ownerEmail.toLowerCase().trim();
+    const accessCode = generateAccessCode();
 
     const newProject = {
       name: name.trim(),
       slug: finalSlug,
+      accessCode,
       ownerEmail: cleanEmail,
       assignedDevelopers: [
         {
@@ -140,7 +192,45 @@ export async function POST(req: Request) {
   }
 }
 
-// 3. DELETE: Delete Project and free the slug from MongoDB
+export async function PATCH(req: Request) {
+  try {
+    const body = await req.json();
+    const { slug, ownerEmail, action } = body;
+
+    if (!slug || !ownerEmail) {
+      return NextResponse.json({ error: "Slug and ownerEmail are required" }, { status: 400 });
+    }
+
+    const { db } = await connectToDatabase();
+    const cleanEmail = ownerEmail.toLowerCase().trim();
+
+    const project = await db.collection("projects").findOne({
+      slug,
+      $or: [
+        { ownerEmail: cleanEmail },
+        { assignedDevelopers: { $elemMatch: { email: cleanEmail, role: { $in: ["owner", "agency_admin"] } } } },
+      ],
+    });
+
+    if (!project) {
+      return NextResponse.json({ error: "Unauthorized or project not found" }, { status: 403 });
+    }
+
+    if (action === "regenerate_code") {
+      const newCode = generateAccessCode();
+      await db.collection("projects").updateOne(
+        { _id: project._id },
+        { $set: { accessCode: newCode, updatedAt: new Date() } }
+      );
+      return NextResponse.json({ success: true, accessCode: newCode });
+    }
+
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || "Failed to update project" }, { status: 500 });
+  }
+}
+
 export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -154,25 +244,19 @@ export async function DELETE(req: Request) {
     const { db } = await connectToDatabase();
     const cleanEmail = ownerEmail.toLowerCase().trim();
 
-    // Verify ownership before deleting
     const project = await db.collection("projects").findOne({ slug, ownerEmail: cleanEmail });
 
     if (!project) {
       return NextResponse.json({ error: "Project not found or unauthorized to delete" }, { status: 404 });
     }
 
-    // 1. Delete all reports linked to this project
     await db.collection("reports").deleteMany({ projectId: slug });
-
-    // 2. Delete all chat messages linked to this project
     await db.collection("project_messages").deleteMany({ projectSlug: slug });
-
-    // 3. Delete the project document (frees the unique slug in MongoDB)
     await db.collection("projects").deleteOne({ _id: project._id });
 
-    return NextResponse.json({ 
-      success: true, 
-      message: `Project ${slug} and its resources have been deleted. Slug is now freed.` 
+    return NextResponse.json({
+      success: true,
+      message: `Project ${slug} and its resources have been deleted. Slug is now freed.`,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Failed to delete project" }, { status: 500 });

@@ -40,6 +40,7 @@ interface Project {
   _id?: string;
   name: string;
   slug: string;
+  accessCode?: string;
   ownerEmail?: string;
   currentUserRole?: "owner" | "agency_admin" | "developer";
   assignedDevelopers?: ProjectMember[];
@@ -83,28 +84,24 @@ export default function Dashboard() {
   const [reports, setReports] = useState<any[]>([]);
   const [isFetching, setIsFetching] = useState(false);
 
-  // Profile State
   const [displayName, setDisplayName] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [avatarColor, setAvatarColor] = useState("#4f46e5");
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
-  // Group Chat State
   const [showChat, setShowChat] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isSendingMsg, setIsSendingMsg] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
-  // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showTeamModal, setShowTeamModal] = useState(false);
   const [showRemoveModal, setShowRemoveModal] = useState(false);
   const [showPasswordResetModal, setShowPasswordResetModal] = useState(false);
 
-  // Scope Expansion & Sign-Off Modals
   const [showScopeModal, setShowScopeModal] = useState(false);
   const [selectedReportForScope, setSelectedReportForScope] = useState<any>(null);
   const [scopeAmount, setScopeAmount] = useState("");
@@ -117,7 +114,6 @@ export default function Dashboard() {
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [activeAuditRecord, setActiveAuditRecord] = useState<any>(null);
 
-  // Project Creation & Dev Invitation Fields
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectSlug, setNewProjectSlug] = useState("");
   const [slugAvailable, setSlugAvailable] = useState<boolean | null>(null);
@@ -126,22 +122,20 @@ export default function Dashboard() {
   const [inviteDevEmail, setInviteDevEmail] = useState("");
   const [inviteDevRole, setInviteDevRole] = useState("developer");
 
-  // Removal state
   const [memberToRemove, setMemberToRemove] = useState<string>("");
   const [removalReason, setRemovalReason] = useState("");
   const [isRemoving, setIsRemoving] = useState(false);
 
-  // Password reset state for manager
   const [targetMemberEmail, setTargetMemberEmail] = useState("");
   const [customNewPassword, setCustomNewPassword] = useState("");
   const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   const [isCreating, setIsCreating] = useState(false);
   const [isInviting, setIsInviting] = useState(false);
-  const [copySuccess, setCopySuccess] = useState(false);
+  const [copyInviteSuccess, setCopyInviteSuccess] = useState(false);
+  const [isRegeneratingCode, setIsRegeneratingCode] = useState(false);
   const [copyStatusSuccess, setCopyStatusSuccess] = useState(false);
 
-  // Super Admin Check
   const superAdminList = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || "")
     .split(",")
     .map((e) => e.trim().toLowerCase());
@@ -153,7 +147,6 @@ export default function Dashboard() {
     }
   }, [user, loading, router]);
 
-  // Real-time debounce check for slug availability
   useEffect(() => {
     if (!newProjectSlug.trim()) {
       setSlugAvailable(null);
@@ -176,7 +169,6 @@ export default function Dashboard() {
     return () => clearTimeout(timer);
   }, [newProjectSlug]);
 
-  // Load User Profile
   const loadProfile = useCallback(async () => {
     if (!user?.email) return;
     try {
@@ -221,7 +213,6 @@ export default function Dashboard() {
     }
   };
 
-  // Load Projects
   const loadProjects = useCallback(async () => {
     if (!user?.email) return;
     try {
@@ -249,7 +240,6 @@ export default function Dashboard() {
     loadProjects();
   }, [loadProjects]);
 
-  // Load Reports
   const fetchReports = useCallback(async () => {
     if (!activeProject?.slug) {
       setReports([]);
@@ -275,7 +265,6 @@ export default function Dashboard() {
     fetchReports();
   }, [fetchReports]);
 
-  // Load Team Chat Messages
   const fetchMessages = useCallback(async () => {
     if (!activeProject?.slug) return;
     try {
@@ -502,12 +491,46 @@ export default function Dashboard() {
     }
   };
 
-  const copyClientLink = () => {
+  const copyInviteWithCode = () => {
     if (!activeProject) return;
     const link = `${window.location.origin}/report/${activeProject.slug}`;
-    navigator.clipboard.writeText(link);
-    setCopySuccess(true);
-    setTimeout(() => setCopySuccess(false), 2000);
+    const code = activeProject.accessCode || "N/A";
+    const shareText = `Submit feedback for ${activeProject.name}:\nLink: ${link}\nAccess Code: ${code}`;
+    navigator.clipboard.writeText(shareText);
+    setCopyInviteSuccess(true);
+    setTimeout(() => setCopyInviteSuccess(false), 2500);
+  };
+
+  const handleRegenerateCode = async () => {
+    if (!activeProject || !user?.email) return;
+    const confirmRegen = window.confirm(
+      "Regenerate the client access code? The old code will stop working immediately."
+    );
+    if (!confirmRegen) return;
+
+    setIsRegeneratingCode(true);
+    try {
+      const res = await fetch("/api/projects", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug: activeProject.slug,
+          ownerEmail: user.email,
+          action: "regenerate_code",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to regenerate code");
+
+      setActiveProject((prev) => (prev ? { ...prev, accessCode: data.accessCode } : null));
+      setProjects((prev) =>
+        prev.map((p) => (p.slug === activeProject.slug ? { ...p, accessCode: data.accessCode } : p))
+      );
+    } catch (err: any) {
+      alert(err.message || "Could not regenerate code");
+    } finally {
+      setIsRegeneratingCode(false);
+    }
   };
 
   const copyStatusLink = () => {
@@ -638,7 +661,6 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col relative overflow-x-hidden">
-      {/* Header */}
       <header className="bg-white border-b border-slate-200 px-6 py-3.5 flex items-center justify-between sticky top-0 z-30">
         <div className="flex items-center gap-4">
           <Link href="/" className="font-black text-2xl tracking-tight text-slate-900" title="Return to Home">
@@ -647,7 +669,6 @@ export default function Dashboard() {
 
           <div className="h-5 w-px bg-slate-200 hidden sm:block" />
 
-          {/* User Profile Trigger */}
           <button
             onClick={() => setShowProfileModal(true)}
             className="flex items-center gap-2.5 p-1 hover:bg-slate-50 rounded-lg transition text-left cursor-pointer"
@@ -674,7 +695,6 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Team Chat Trigger Button */}
           {activeProject && (
             <button
               onClick={() => setShowChat((prev) => !prev)}
@@ -689,7 +709,6 @@ export default function Dashboard() {
             </button>
           )}
 
-          {/* Super Admin Restricted Button */}
           {isSuperAdmin && (
             <Link
               href="/admin"
@@ -710,7 +729,6 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* Workspace Bar */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 shadow-xs">
         <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -772,15 +790,35 @@ export default function Dashboard() {
                 </>
               )}
 
-              {/* Copy Report Portal Link */}
-              <button
-                onClick={copyClientLink}
-                className="inline-flex items-center gap-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-medium transition cursor-pointer"
-                title="Copy client bug intake link"
-              >
-                {copySuccess ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copySuccess ? "Link Copied!" : "Copy Report Link"}</span>
-              </button>
+              <div className="inline-flex items-center rounded-lg border border-indigo-200 bg-indigo-50/70 overflow-hidden">
+                <div className="px-2.5 py-1.5 flex items-center gap-1.5 text-xs">
+                  <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
+                  <span className="text-slate-500 font-medium hidden md:inline">Code:</span>
+                  <code className="font-mono font-bold text-indigo-700 tracking-wider">
+                    {activeProject.accessCode || "------"}
+                  </code>
+                </div>
+
+                <button
+                  onClick={copyInviteWithCode}
+                  className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium flex items-center gap-1 transition cursor-pointer"
+                  title="Copy portal URL and Access Code together"
+                >
+                  {copyInviteSuccess ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copyInviteSuccess ? "Copied Invite!" : "Copy Link + Code"}</span>
+                </button>
+
+                {isProjectManager && (
+                  <button
+                    onClick={handleRegenerateCode}
+                    disabled={isRegeneratingCode}
+                    className="px-2 py-1.5 text-indigo-600 hover:bg-indigo-100 border-l border-indigo-200 transition cursor-pointer disabled:opacity-50"
+                    title="Generate new access code"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRegeneratingCode ? "animate-spin" : ""}`} />
+                  </button>
+                )}
+              </div>
 
               <a
                 href={`/report/${activeProject.slug}`}
@@ -792,7 +830,6 @@ export default function Dashboard() {
                 <ExternalLink className="w-4 h-4" />
               </a>
 
-              {/* Client Public Status Board & Changelog Link */}
               <div className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 overflow-hidden">
                 <a
                   href={`/report/${activeProject.slug}/status`}
@@ -835,7 +872,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Main Ticket Workspace with Responsive Chat Drawer */}
       <div className="flex-1 flex overflow-hidden">
         <main className="max-w-6xl w-full mx-auto p-6 flex-1 transition-all">
           <div className="flex justify-between items-center mb-6">
@@ -906,7 +942,6 @@ export default function Dashboard() {
                           {isBillable ? "Scope Expansion (Billable)" : "Defect (Warranty)"}
                         </button>
 
-                        {/* Billable Approval Badge & Triggers */}
                         {isBillable && (
                           <>
                             {isApproved ? (
@@ -971,7 +1006,6 @@ export default function Dashboard() {
                       </div>
                     </div>
 
-                    {/* Scope Estimate Box if Billable */}
                     {isBillable && report.scopeApproval?.estimate && (
                       <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-3 text-xs text-slate-700 mb-3 space-y-1">
                         <div className="flex items-center justify-between font-semibold">
@@ -1019,13 +1053,12 @@ export default function Dashboard() {
               <div className="text-center py-16 bg-white border border-slate-200 rounded-xl text-slate-400 text-sm">
                 <Layers className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                 <p className="text-slate-700 font-medium">No reports logged for this project yet</p>
-                <p className="text-xs text-slate-400 mt-1">Share the client link above to begin receiving items.</p>
+                <p className="text-xs text-slate-400 mt-1">Share the client link and access code above to begin receiving items.</p>
               </div>
             )}
           </div>
         </main>
 
-        {/* Floating / Sliding Team Group Chat Drawer */}
         <AnimatePresence>
           {showChat && activeProject && (
             <motion.aside
@@ -1117,7 +1150,6 @@ export default function Dashboard() {
         </AnimatePresence>
       </div>
 
-      {/* Modal 1: Developer Profile */}
       {showProfileModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-200">
@@ -1184,7 +1216,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Modal 2: Team Roster & Removal */}
       {showTeamModal && activeProject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl border border-slate-200">
@@ -1254,7 +1285,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Modal 3: Removal Reason */}
       {showRemoveModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-slate-200">
@@ -1297,7 +1327,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Modal 4: Add Developer */}
       {showInviteModal && activeProject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-slate-200">
@@ -1348,12 +1377,11 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Modal 5: Create Project with Live Slug Availability */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-slate-200">
             <h3 className="text-lg font-bold text-slate-900 mb-1">Create New Client Project</h3>
-            <p className="text-xs text-slate-500 mb-4">Each project gets a globally unique URL slug for client feedback intake.</p>
+            <p className="text-xs text-slate-500 mb-4">Each project gets a globally unique URL slug and an auto-generated client access code.</p>
             
             <form onSubmit={handleCreateProject} className="space-y-4">
               <div>
@@ -1427,7 +1455,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Modal 6: Manager Password Reset */}
       {showPasswordResetModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-slate-200">
@@ -1474,7 +1501,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Modal 7: Out-of-Warranty Scope Quote Dispatch */}
       {showScopeModal && selectedReportForScope && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-slate-200">
@@ -1580,7 +1606,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Modal 8: Digital Audit Signature Inspection */}
       {showAuditModal && activeAuditRecord && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-slate-200">
