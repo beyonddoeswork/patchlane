@@ -1,23 +1,27 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { 
-  KeyRound, 
-  Lock, 
-  CheckCircle2, 
-  AlertCircle, 
-  Send, 
-  Activity, 
-  ArrowRight 
+import {
+  KeyRound,
+  Lock,
+  CheckCircle2,
+  AlertCircle,
+  Monitor,
+  Upload,
+  X,
+  Activity,
+  ArrowRight,
+  Image as ImageIcon,
 } from "lucide-react";
 
 export default function ClientReportPortal() {
   const params = useParams();
   const projectSlug = (params?.projectSlug || params?.slug || params?.id) as string;
 
+  // Workspace & Gatekeeper State
   const [projectName, setProjectName] = useState("");
   const [pageLoading, setPageLoading] = useState(true);
   const [notFoundError, setNotFoundError] = useState("");
@@ -28,12 +32,19 @@ export default function ClientReportPortal() {
   const [codeError, setCodeError] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
 
-  const [summary, setSummary] = useState("");
+  // Report Form State
   const [url, setUrl] = useState("");
+  const [summary, setSummary] = useState("");
   const [expected, setExpected] = useState("");
   const [actual, setActual] = useState("");
   const [clientEmail, setClientEmail] = useState("");
+
+  // Screenshot Upload / Drag-and-Drop State
   const [attachmentUrl, setAttachmentUrl] = useState("");
+  const [previewName, setPreviewName] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
@@ -117,6 +128,33 @@ export default function ClientReportPortal() {
     setCodeError("");
   };
 
+  const processFile = (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      alert("Please upload an image file (PNG, JPG, WebP).");
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      alert("Image must be under 4MB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setAttachmentUrl(reader.result);
+        setPreviewName(file.name);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) processFile(file);
+  };
+
   const handleSubmitReport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!summary.trim()) return;
@@ -140,7 +178,7 @@ export default function ClientReportPortal() {
           expected,
           actual,
           clientEmail,
-          attachmentUrl,
+          attachmentUrl: attachmentUrl || null,
           clientMeta,
         }),
       });
@@ -176,6 +214,7 @@ export default function ClientReportPortal() {
     );
   }
 
+  // 1. GATEKEEPER SCREEN (Requires 6-Character Access Code)
   if (!isUnlocked) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 selection:bg-indigo-600 selection:text-white">
@@ -246,6 +285,7 @@ export default function ClientReportPortal() {
     );
   }
 
+  // 2. SUCCESS SCREEN
   if (submitted) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 text-center">
@@ -253,9 +293,9 @@ export default function ClientReportPortal() {
           <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto border border-emerald-100">
             <CheckCircle2 className="w-6 h-6" />
           </div>
-          <h2 className="text-xl font-black text-slate-900">Report Logged</h2>
+          <h2 className="text-xl font-black text-slate-900">Report Sent</h2>
           <p className="text-xs text-slate-600 leading-relaxed">
-            Your feedback has been sent directly to the <strong>{projectName}</strong> engineering team.
+            Your report has been logged for <strong>{projectName}</strong> along with your environment diagnostics.
           </p>
           <div className="flex flex-col sm:flex-row gap-2 pt-2">
             <button
@@ -265,6 +305,7 @@ export default function ClientReportPortal() {
                 setExpected("");
                 setActual("");
                 setAttachmentUrl("");
+                setPreviewName("");
                 setSubmitted(false);
               }}
               className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold py-2.5 rounded-xl transition cursor-pointer"
@@ -283,119 +324,183 @@ export default function ClientReportPortal() {
     );
   }
 
+  // 3. UNLOCKED REPORT AN ISSUE FORM
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center p-6 sm:p-10 selection:bg-indigo-600 selection:text-white">
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 selection:bg-indigo-600 selection:text-white">
       <div className="w-full max-w-xl">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <span className="font-black text-2xl tracking-tight text-slate-900">
-              Patchlane<span className="text-indigo-600">.</span>
-            </span>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Client Acceptance Portal • <strong className="text-slate-800">{projectName}</strong>
-            </p>
-          </div>
+        {/* Top Utility Bar */}
+        <div className="flex items-center justify-between mb-3 px-1">
+          <Link href="/" className="font-black text-lg tracking-tight text-slate-900">
+            Patchlane<span className="text-indigo-600">.</span>
+          </Link>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handleLockPortal}
-              className="text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
-              title="Lock portal and require access code"
+              className="text-xs font-medium text-slate-500 hover:text-slate-800 bg-white border border-slate-200 px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer"
+              title="Lock portal and re-enter access code"
             >
-              <Lock className="w-3.5 h-3.5 text-slate-500" />
+              <Lock className="w-3 h-3" />
               <span>Lock</span>
             </button>
             <Link
               href={`/report/${projectSlug}/status`}
-              className="text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 shadow-2xs"
+              className="text-xs font-medium text-slate-700 hover:text-indigo-600 bg-white border border-slate-200 px-2.5 py-1 rounded-lg transition flex items-center gap-1"
             >
-              <Activity className="w-3.5 h-3.5 text-indigo-600" />
+              <Activity className="w-3 h-3 text-indigo-600" />
               <span>Status Board</span>
             </Link>
           </div>
         </div>
 
-        <form onSubmit={handleSubmitReport} className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Issue or Request Summary *</label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. Checkout button unresponsive on mobile Safari"
-              value={summary}
-              onChange={(e) => setSummary(e.target.value)}
-              className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600 bg-slate-50 focus:bg-white transition"
-            />
+        {/* Main Card */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm">
+          {/* Card Header */}
+          <div className="flex items-start justify-between pb-4 mb-5 border-b border-slate-100 gap-3">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900 tracking-tight">Report an Issue</h1>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Project ID: <span className="font-mono text-slate-700">{projectSlug}</span>
+              </p>
+            </div>
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-600 bg-slate-100 border border-slate-200/80 px-2.5 py-1 rounded-full shrink-0">
+              <Monitor className="w-3.5 h-3.5 text-slate-500" />
+              <span>Diagnostics Auto-Captured</span>
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <form onSubmit={handleSubmitReport} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Affected Page / URL</label>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                Where did it happen? (Page URL)
+              </label>
               <input
                 type="text"
-                placeholder="e.g. /checkout or https://..."
+                placeholder="e.g. /checkout or https://yoursite.com/pricing"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600 bg-slate-50 focus:bg-white transition"
+                className="w-full text-xs border border-slate-200 rounded-xl p-3 outline-none focus:border-indigo-600 bg-white transition"
               />
             </div>
+
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Your Email (for updates)</label>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                Issue Summary *
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. 'Pay Now' button does nothing on iPhone Safari"
+                value={summary}
+                onChange={(e) => setSummary(e.target.value)}
+                className="w-full text-xs border border-slate-200 rounded-xl p-3 outline-none focus:border-indigo-600 bg-white transition"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                  What did you expect?
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="The confirmation page should load"
+                  value={expected}
+                  onChange={(e) => setExpected(e.target.value)}
+                  className="w-full text-xs border border-slate-200 rounded-xl p-3 outline-none focus:border-indigo-600 bg-white transition"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                  What actually happened?
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Screen remained blank with spinning icon"
+                  value={actual}
+                  onChange={(e) => setActual(e.target.value)}
+                  className="w-full text-xs border border-slate-200 rounded-xl p-3 outline-none focus:border-indigo-600 bg-white transition"
+                />
+              </div>
+            </div>
+
+            {/* Drag-and-Drop Screenshot Uploader */}
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                Screenshot / Proof (Optional)
+              </label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) processFile(file);
+                }}
+              />
+
+              {!attachmentUrl ? (
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleDrop}
+                  className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition ${
+                    isDragging
+                      ? "border-indigo-500 bg-indigo-50/50"
+                      : "border-slate-200 hover:border-indigo-400 hover:bg-slate-50/60"
+                  }`}
+                >
+                  <Upload className="w-5 h-5 text-slate-400 mx-auto mb-1.5" />
+                  <p className="text-xs text-slate-500 font-medium">Click or drag screenshot here</p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs">
+                  <div className="flex items-center gap-2 truncate">
+                    <ImageIcon className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span className="font-medium text-slate-700 truncate">{previewName || "Screenshot attached"}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttachmentUrl("");
+                      setPreviewName("");
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                    }}
+                    className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                Your Email (For Updates)
+              </label>
               <input
                 type="email"
-                placeholder="you@company.com"
+                placeholder="client@company.com"
                 value={clientEmail}
                 onChange={(e) => setClientEmail(e.target.value)}
-                className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600 bg-slate-50 focus:bg-white transition"
+                className="w-full text-xs border border-slate-200 rounded-xl p-3 outline-none focus:border-indigo-600 bg-white transition"
               />
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Expected Behaviour</label>
-              <textarea
-                rows={3}
-                placeholder="What should happen?"
-                value={expected}
-                onChange={(e) => setExpected(e.target.value)}
-                className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600 bg-slate-50 focus:bg-white transition"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Actual Behaviour</label>
-              <textarea
-                rows={3}
-                placeholder="What happened instead?"
-                value={actual}
-                onChange={(e) => setActual(e.target.value)}
-                className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600 bg-slate-50 focus:bg-white transition"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Screenshot / Loom Link <span className="text-slate-400 font-normal">(Optional)</span>
-            </label>
-            <input
-              type="url"
-              placeholder="https://..."
-              value={attachmentUrl}
-              onChange={(e) => setAttachmentUrl(e.target.value)}
-              className="w-full text-xs border border-slate-200 rounded-lg p-2.5 outline-none focus:border-indigo-600 bg-slate-50 focus:bg-white transition"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
-          >
-            <Send className="w-3.5 h-3.5" />
-            <span>{isSubmitting ? "Submitting Report..." : "Submit Report to Team"}</span>
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold text-xs py-3.5 rounded-xl transition shadow-xs cursor-pointer"
+            >
+              {isSubmitting ? "Sending Report..." : "Send Report"}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );
