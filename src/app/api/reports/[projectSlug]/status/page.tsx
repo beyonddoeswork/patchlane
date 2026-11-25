@@ -1,439 +1,282 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
+  Activity,
   CheckCircle2,
   Clock,
   AlertCircle,
-  RefreshCw,
-  Search,
-  ArrowLeft,
-  Activity,
-  Layers,
+  DollarSign,
   ShieldCheck,
-  TrendingUp,
+  FileSignature,
+  ArrowLeft,
+  RefreshCw,
 } from "lucide-react";
 
-interface PublicTicket {
-  id: string;
-  summary: string;
-  status: "Open" | "In Progress" | "Fixed";
-  url: string;
-  createdAt: string;
-  updatedAt: string;
-  reportedBy: string;
-}
-
-const statusConfig = {
-  Open: {
-    label: "Under Review",
-    stepIndex: 1,
-    color: "bg-rose-50 text-rose-700 border-rose-200",
-    dot: "bg-rose-500",
-  },
-  "In Progress": {
-    label: "In Progress",
-    stepIndex: 2,
-    color: "bg-amber-50 text-amber-700 border-amber-200",
-    dot: "bg-amber-500 animate-pulse",
-  },
-  Fixed: {
-    label: "Resolved",
-    stepIndex: 3,
-    color: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    dot: "bg-emerald-500",
-  },
-};
-
-export default function ClientProjectStatusPage() {
+export default function ClientStatusBoardPage() {
   const params = useParams();
-  const projectSlug = params?.projectSlug as string;
+  const projectId = (params?.projectId || params?.projectSlug) as string;
 
   const [projectName, setProjectName] = useState("");
-  const [tickets, setTickets] = useState<PublicTicket[]>([]);
+  const [reports, setReports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedStatus, setSelectedStatus] = useState<string>("all");
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const fetchStatus = useCallback(async (isManual = false) => {
-    if (!projectSlug) return;
-    if (isManual) setIsRefreshing(true);
-    else setLoading(true);
-
+  const fetchBoardData = async () => {
+    if (!projectId) return;
+    setLoading(true);
+    setError("");
     try {
-      const res = await fetch(`/api/reports/status?slug=${encodeURIComponent(projectSlug)}`, {
-        cache: "no-store",
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Unable to load status board");
+      const projRes = await fetch(
+        `/api/projects?verifySlug=${encodeURIComponent(projectId)}`,
+        { cache: "no-store" }
+      );
+      const projData = await projRes.json();
+      if (!projRes.ok) {
+        throw new Error(projData.error || "Project workspace not found.");
+      }
+      setProjectName(projData.projectName || projectId);
 
-      setProjectName(data.projectName || projectSlug);
-      setTickets(data.reports || []);
-      setError("");
+      const repRes = await fetch(
+        `/api/reports?projectId=${encodeURIComponent(projectId)}`,
+        { cache: "no-store" }
+      );
+      const repData = await repRes.json();
+      if (!repRes.ok) {
+        throw new Error(repData.error || "Failed to load project status.");
+      }
+      setReports(repData.reports || []);
     } catch (err: any) {
-      setError(err.message || "Failed to load project updates");
+      setError(err.message || "Unable to load status board.");
     } finally {
       setLoading(false);
-      setIsRefreshing(false);
     }
-  }, [projectSlug]);
+  };
 
   useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(() => fetchStatus(true), 15000);
-    return () => clearInterval(interval);
-  }, [fetchStatus]);
+    fetchBoardData();
+  }, [projectId]);
 
-  // Calculations for the global progress bar
-  const totalTickets = tickets.length;
-  const resolvedTickets = useMemo(() => tickets.filter((t) => t.status === "Fixed").length, [tickets]);
-  const inProgressTickets = useMemo(() => tickets.filter((t) => t.status === "In Progress").length, [tickets]);
-  const openTickets = useMemo(() => tickets.filter((t) => t.status === "Open").length, [tickets]);
-
-  const completionPercentage = totalTickets > 0 ? Math.round((resolvedTickets / totalTickets) * 100) : 0;
-
-  // Filtered tickets
-  const filteredTickets = useMemo(() => {
-    return tickets.filter((t) => {
-      const matchesSearch =
-        t.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        t.url.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = selectedStatus === "all" || t.status === selectedStatus;
-      return matchesSearch && matchesStatus;
-    });
-  }, [tickets, searchQuery, selectedStatus]);
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "Fixed":
+        return (
+          <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <CheckCircle2 className="w-3 h-3" />
+            <span>Fixed</span>
+          </span>
+        );
+      case "In Progress":
+        return (
+          <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+            <Clock className="w-3 h-3" />
+            <span>In Progress</span>
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+            <AlertCircle className="w-3 h-3" />
+            <span>Open</span>
+          </span>
+        );
+    }
+  };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
-        <Activity className="w-8 h-8 text-indigo-600 animate-spin mb-3" />
-        <p className="text-xs font-semibold text-slate-500">Loading live status updates...</p>
-      </div>
+      <main className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <p className="text-xs font-semibold text-slate-500 animate-pulse">
+          Loading live project status...
+        </p>
+      </main>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+      <main className="min-h-screen bg-slate-50 flex items-center justify-center p-6 text-center">
         <div className="bg-white border border-slate-200 rounded-2xl p-8 max-w-md w-full shadow-sm">
           <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-3" />
-          <h2 className="text-base font-bold text-slate-900 mb-1">Status Unavailable</h2>
+          <h2 className="text-base font-bold text-slate-900 mb-1">Status Board Unavailable</h2>
           <p className="text-xs text-slate-500 mb-4">{error}</p>
           <Link
-            href={`/report/${projectSlug}`}
+            href={`/report/${projectId}`}
             className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition inline-block"
           >
-            Submit Feedback Instead
+            Go to Report Portal
           </Link>
         </div>
-      </div>
+      </main>
     );
   }
 
+  const fixedCount = reports.filter((r) => r.status === "Fixed").length;
+  const billableCount = reports.filter((r) => r.classification === "Scope Expansion").length;
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col selection:bg-indigo-600 selection:text-white">
-      {/* Top Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-20 px-6 py-4">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link
-              href={`/report/${projectSlug}`}
-              className="text-xs font-semibold text-slate-500 hover:text-slate-900 flex items-center gap-1 transition"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Submit Ticket</span>
-            </Link>
-            <div className="h-4 w-px bg-slate-200" />
+    <main className="min-h-screen bg-slate-50 p-4 sm:p-8 selection:bg-indigo-600 selection:text-white">
+      <div className="max-w-3xl mx-auto">
+        {/* Top Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <div>
             <div className="flex items-center gap-2">
-              <span className="font-black text-lg tracking-tight text-slate-900">
+              <span className="font-black text-2xl tracking-tight text-slate-900">
                 Patchlane<span className="text-indigo-600">.</span>
               </span>
-              <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200">
-                Live Status Board
+              <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full">
+                Live Status & Billing
               </span>
             </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Workspace: <strong className="text-slate-800">{projectName}</strong> ({projectId})
+            </p>
           </div>
 
-          <button
-            onClick={() => fetchStatus(true)}
-            disabled={isRefreshing}
-            className="text-xs text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-indigo-600" : ""}`} />
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
-        </div>
-      </header>
-
-      {/* Main Container */}
-      <main className="max-w-4xl w-full mx-auto p-6 sm:p-8 flex-1 space-y-6">
-        {/* Title & Overall Progress Bar Card */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-black text-slate-900 tracking-tight">{projectName}</h1>
-                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
-              </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Real-time milestone resolution & acceptance tracker
-              </p>
-            </div>
-
-            <Link
-              href={`/report/${projectSlug}`}
-              className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl transition shadow-xs"
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchBoardData}
+              className="text-xs font-medium text-slate-600 hover:text-slate-900 bg-white border border-slate-200 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
             >
-              <span>+ Report New Issue</span>
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Refresh</span>
+            </button>
+            <Link
+              href={`/report/${projectId}`}
+              className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-lg transition flex items-center gap-1.5 shadow-2xs"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Log New Issue</span>
             </Link>
           </div>
+        </div>
 
-          {/* THE GLOBAL PROGRESS BAR */}
-          <div className="pt-2 border-t border-slate-100 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-slate-700 flex items-center gap-1.5">
-                <TrendingUp className="w-3.5 h-3.5 text-indigo-600" />
-                <span>Overall Project Resolution</span>
-              </span>
-              <span className="font-mono text-xs font-bold text-slate-900">
-                {resolvedTickets} of {totalTickets} Resolved ({completionPercentage}%)
-              </span>
-            </div>
-
-            {/* Segmented Progress Bar */}
-            <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden flex shadow-inner">
-              <div
-                style={{ width: `${totalTickets > 0 ? (resolvedTickets / totalTickets) * 100 : 0}%` }}
-                className="bg-emerald-500 h-full transition-all duration-500 ease-out"
-                title={`Resolved: ${resolvedTickets}`}
-              />
-              <div
-                style={{ width: `${totalTickets > 0 ? (inProgressTickets / totalTickets) * 100 : 0}%` }}
-                className="bg-amber-400 h-full transition-all duration-500 ease-out"
-                title={`In Progress: ${inProgressTickets}`}
-              />
-              <div
-                style={{ width: `${totalTickets > 0 ? (openTickets / totalTickets) * 100 : 0}%` }}
-                className="bg-rose-400 h-full transition-all duration-500 ease-out"
-                title={`Under Review: ${openTickets}`}
-              />
-            </div>
-
-            {/* Legend */}
-            <div className="flex items-center gap-4 text-[11px] text-slate-500 pt-1">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                Resolved ({resolvedTickets})
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-amber-400" />
-                In Progress ({inProgressTickets})
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-rose-400" />
-                Under Review ({openTickets})
-              </span>
-            </div>
+        {/* Summary Metrics */}
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Total Logged
+            </span>
+            <p className="text-xl font-black text-slate-900 mt-0.5">{reports.length}</p>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">
+              Resolved
+            </span>
+            <p className="text-xl font-black text-emerald-700 mt-0.5">{fixedCount}</p>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">
+              Billable Scope Items
+            </span>
+            <p className="text-xl font-black text-blue-700 mt-0.5">{billableCount}</p>
           </div>
         </div>
 
-        {/* Filter Pills */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <button
-            onClick={() => setSelectedStatus("all")}
-            className={`p-3 rounded-xl border text-left transition cursor-pointer ${
-              selectedStatus === "all"
-                ? "bg-slate-900 text-white border-slate-900 shadow-xs"
-                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            <span className="text-[10px] font-semibold uppercase tracking-wider block opacity-70">
-              Total Logged
-            </span>
-            <span className="text-lg font-black mt-0.5 block">{totalTickets}</span>
-          </button>
-
-          <button
-            onClick={() => setSelectedStatus("Open")}
-            className={`p-3 rounded-xl border text-left transition cursor-pointer ${
-              selectedStatus === "Open"
-                ? "bg-rose-600 text-white border-rose-600 shadow-xs"
-                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            <span className="text-[10px] font-semibold uppercase tracking-wider block opacity-70">
-              Under Review
-            </span>
-            <span className="text-lg font-black mt-0.5 block">{openTickets}</span>
-          </button>
-
-          <button
-            onClick={() => setSelectedStatus("In Progress")}
-            className={`p-3 rounded-xl border text-left transition cursor-pointer ${
-              selectedStatus === "In Progress"
-                ? "bg-amber-600 text-white border-amber-600 shadow-xs"
-                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            <span className="text-[10px] font-semibold uppercase tracking-wider block opacity-70">
-              In Progress
-            </span>
-            <span className="text-lg font-black mt-0.5 block">{inProgressTickets}</span>
-          </button>
-
-          <button
-            onClick={() => setSelectedStatus("Fixed")}
-            className={`p-3 rounded-xl border text-left transition cursor-pointer ${
-              selectedStatus === "Fixed"
-                ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
-                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            <span className="text-[10px] font-semibold uppercase tracking-wider block opacity-70">
-              Resolved
-            </span>
-            <span className="text-lg font-black mt-0.5 block">{resolvedTickets}</span>
-          </button>
-        </div>
-
-        {/* Search Input */}
-        <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-          <input
-            type="text"
-            placeholder="Search tickets by keyword or affected page..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full text-xs bg-white border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 outline-none focus:border-indigo-600 transition shadow-2xs"
-          />
-        </div>
-
-        {/* Tickets Stream with Individual 3-Step Progress Indicators */}
-        <div className="space-y-3">
-          <AnimatePresence>
-            {filteredTickets.map((ticket) => {
-              const cfg = statusConfig[ticket.status] || statusConfig.Open;
-              const currentStep = cfg.stepIndex;
+        {/* Ticket List */}
+        <div className="space-y-3.5">
+          {reports.length === 0 ? (
+            <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400">
+              <Activity className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+              <p className="text-sm font-semibold text-slate-700">No items reported yet</p>
+              <p className="text-xs mt-1">
+                Submitted issues and scope requests will appear here with real-time status and billing classification.
+              </p>
+            </div>
+          ) : (
+            reports.map((report) => {
+              const isBillable = report.classification === "Scope Expansion";
+              const approvalStatus = report.scopeApproval?.approvalStatus || "none";
+              const estimate = report.scopeApproval?.estimate;
+              const priceLabel = estimate
+                ? `${estimate.currency === "INR" ? "₹" : "$"}${estimate.amount}`
+                : "";
 
               return (
                 <motion.div
-                  key={ticket.id}
-                  layout
+                  key={report.id}
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="bg-white border border-slate-200 rounded-xl p-5 shadow-2xs hover:border-slate-300 transition space-y-3"
+                  className="bg-white border border-slate-200 rounded-2xl p-5 shadow-2xs space-y-3"
                 >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-100">
-                    <span className="text-xs sm:text-sm font-semibold text-slate-900 leading-snug">
-                      {ticket.summary}
-                    </span>
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Warranty vs Payable Badge */}
+                        {isBillable ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
+                            <DollarSign className="w-3 h-3" />
+                            <span>Payable Scope Expansion</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
+                            <ShieldCheck className="w-3 h-3" />
+                            <span>Warranty / Included (Free)</span>
+                          </span>
+                        )}
 
-                    <div className="text-[11px] text-slate-400 shrink-0 flex items-center gap-2">
-                      <span>Logged by {ticket.reportedBy}</span>
-                      <span>•</span>
-                      <span>
-                        {new Date(ticket.createdAt).toLocaleDateString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                        })}
-                      </span>
+                        {report.url && (
+                          <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                            {report.url}
+                          </span>
+                        )}
+                      </div>
+                      <h3 className="text-sm font-bold text-slate-900 pt-0.5">{report.summary}</h3>
                     </div>
+
+                    {getStatusBadge(report.status || "Open")}
                   </div>
 
-                  {ticket.url && (
-                    <div className="text-[11px] font-mono text-slate-500 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded w-fit max-w-full truncate">
-                      {ticket.url}
+                  {/* Payable Scope Details & Sign-Off Action */}
+                  {isBillable && (
+                    <div className="bg-blue-50/60 border border-blue-200/80 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="text-xs space-y-0.5">
+                        <p className="font-bold text-blue-950">
+                          {estimate
+                            ? `Quoted Fee: ${priceLabel}${estimate.hoursEstimate ? ` (${estimate.hoursEstimate} hrs)` : ""}`
+                            : "Out-of-Warranty Work — Quote Pending"}
+                        </p>
+                        {estimate?.developerNotes && (
+                          <p className="text-[11px] text-slate-600 italic">"{estimate.developerNotes}"</p>
+                        )}
+                      </div>
+
+                      {approvalStatus === "approved" ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100/80 border border-emerald-200 px-3 py-1.5 rounded-lg shrink-0">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Approved & Signed</span>
+                        </span>
+                      ) : approvalStatus === "pending_review" ? (
+                        <Link
+                          href={`/report/${projectId}/approve/${report.id}`}
+                          className="inline-flex items-center gap-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-lg transition shadow-2xs shrink-0"
+                        >
+                          <FileSignature className="w-3.5 h-3.5" />
+                          <span>Review & Sign Quote</span>
+                        </Link>
+                      ) : (
+                        <span className="text-[11px] font-semibold text-blue-700">
+                          Awaiting Agency Quote
+                        </span>
+                      )}
                     </div>
                   )}
 
-                  {/* 3-Step Timeline Bar for this Ticket */}
-                  <div className="pt-2">
-                    <div className="flex items-center justify-between relative">
-                      {/* Connecting Line */}
-                      <div className="absolute top-1/2 left-0 right-0 -translate-y-1/2 h-0.5 bg-slate-100 z-0" />
-                      <div
-                        className="absolute top-1/2 left-0 -translate-y-1/2 h-0.5 bg-indigo-500 z-0 transition-all duration-300"
-                        style={{
-                          width: currentStep === 1 ? "0%" : currentStep === 2 ? "50%" : "100%",
-                        }}
-                      />
-
-                      {/* Step 1: Under Review */}
-                      <div className="relative z-10 flex flex-col items-center bg-white px-2">
-                        <div
-                          className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                            currentStep >= 1
-                              ? "bg-indigo-600 text-white"
-                              : "bg-slate-200 text-slate-500"
-                          }`}
-                        >
-                          ✓
-                        </div>
-                        <span className="text-[10px] font-medium text-slate-600 mt-1">Under Review</span>
-                      </div>
-
-                      {/* Step 2: In Progress */}
-                      <div className="relative z-10 flex flex-col items-center bg-white px-2">
-                        <div
-                          className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                            currentStep >= 2
-                              ? "bg-amber-500 text-white animate-pulse"
-                              : "bg-slate-200 text-slate-400"
-                          }`}
-                        >
-                          {currentStep >= 2 ? "•" : "2"}
-                        </div>
-                        <span className="text-[10px] font-medium text-slate-600 mt-1">In Progress</span>
-                      </div>
-
-                      {/* Step 3: Resolved */}
-                      <div className="relative z-10 flex flex-col items-center bg-white px-2">
-                        <div
-                          className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                            currentStep === 3
-                              ? "bg-emerald-600 text-white"
-                              : "bg-slate-200 text-slate-400"
-                          }`}
-                        >
-                          {currentStep === 3 ? "✓" : "3"}
-                        </div>
-                        <span className="text-[10px] font-medium text-slate-600 mt-1">Resolved</span>
-                      </div>
-                    </div>
+                  <div className="text-[11px] text-slate-400 flex items-center justify-between pt-1 border-t border-slate-100">
+                    <span>
+                      Logged {report.createdAt ? new Date(report.createdAt).toLocaleDateString() : ""}
+                    </span>
+                    <span>{isBillable ? "Billable Out-of-Scope" : "Covered Under Warranty"}</span>
                   </div>
                 </motion.div>
               );
-            })}
-          </AnimatePresence>
-
-          {filteredTickets.length === 0 && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400">
-              <Layers className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-              <p className="text-xs font-semibold text-slate-700">No matching items found</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                {searchQuery || selectedStatus !== "all"
-                  ? "Try clearing your filters to view all project items."
-                  : "No feedback items logged for this workspace yet."}
-              </p>
-            </div>
+            })
           )}
         </div>
-
-        {/* Footer */}
-        <div className="pt-6 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-400 gap-2">
-          <div className="flex items-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Encrypted read-only client changelog powered by Patchlane.</span>
-          </div>
-          <div>All ticket progress syncs automatically with the agency team.</div>
-        </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }

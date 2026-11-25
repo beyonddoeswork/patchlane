@@ -13,7 +13,7 @@ import {
 
 export default function ScopeSignOffPage() {
   const params = useParams();
-  const projectSlug = params?.projectSlug as string;
+  const projectSlug = (params?.projectId || params?.projectSlug) as string;
   const ticketId = params?.ticketId as string;
 
   const [ticket, setTicket] = useState<any>(null);
