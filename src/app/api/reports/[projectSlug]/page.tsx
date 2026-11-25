@@ -16,7 +16,7 @@ import {
 
 export default function ClientReportPortal() {
   const params = useParams();
-  const projectSlug = params?.projectSlug as string;
+  const projectSlug = (params?.projectSlug || params?.slug || params?.id) as string;
 
   const [projectName, setProjectName] = useState("");
   const [pageLoading, setPageLoading] = useState(true);
@@ -41,7 +41,10 @@ export default function ClientReportPortal() {
     async function checkWorkspace() {
       if (!projectSlug) return;
       try {
-        const res = await fetch(`/api/projects?verifySlug=${encodeURIComponent(projectSlug)}`);
+        const res = await fetch(
+          `/api/projects?verifySlug=${encodeURIComponent(projectSlug)}`,
+          { cache: "no-store" }
+        );
         const data = await res.json();
         if (!res.ok) {
           setNotFoundError(data.error || "Project workspace not found.");
@@ -54,13 +57,16 @@ export default function ClientReportPortal() {
         const savedCode = sessionStorage.getItem(`patchlane_code_${projectSlug}`);
         if (savedCode) {
           const verifyRes = await fetch(
-            `/api/projects?verifySlug=${encodeURIComponent(projectSlug)}&code=${encodeURIComponent(savedCode)}`
+            `/api/projects?verifySlug=${encodeURIComponent(projectSlug)}&code=${encodeURIComponent(savedCode)}`,
+            { cache: "no-store" }
           );
-          if (verifyRes.ok) {
+          const verifyData = await verifyRes.json();
+          if (verifyRes.ok && verifyData.valid) {
             setVerifiedCode(savedCode);
             setIsUnlocked(true);
           } else {
             sessionStorage.removeItem(`patchlane_code_${projectSlug}`);
+            setIsUnlocked(false);
           }
         }
       } catch {
@@ -81,7 +87,8 @@ export default function ClientReportPortal() {
     try {
       const cleanCode = accessCodeInput.trim().toUpperCase();
       const res = await fetch(
-        `/api/projects?verifySlug=${encodeURIComponent(projectSlug)}&code=${encodeURIComponent(cleanCode)}`
+        `/api/projects?verifySlug=${encodeURIComponent(projectSlug)}&code=${encodeURIComponent(cleanCode)}`,
+        { cache: "no-store" }
       );
       const data = await res.json();
 
@@ -98,6 +105,16 @@ export default function ClientReportPortal() {
     } finally {
       setIsVerifying(false);
     }
+  };
+
+  const handleLockPortal = () => {
+    if (projectSlug) {
+      sessionStorage.removeItem(`patchlane_code_${projectSlug}`);
+    }
+    setIsUnlocked(false);
+    setVerifiedCode("");
+    setAccessCodeInput("");
+    setCodeError("");
   };
 
   const handleSubmitReport = async (e: React.FormEvent) => {
@@ -278,13 +295,24 @@ export default function ClientReportPortal() {
               Client Acceptance Portal • <strong className="text-slate-800">{projectName}</strong>
             </p>
           </div>
-          <Link
-            href={`/report/${projectSlug}/status`}
-            className="text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 shadow-2xs"
-          >
-            <Activity className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Status Board</span>
-          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleLockPortal}
+              className="text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+              title="Lock portal and require access code"
+            >
+              <Lock className="w-3.5 h-3.5 text-slate-500" />
+              <span>Lock</span>
+            </button>
+            <Link
+              href={`/report/${projectSlug}/status`}
+              className="text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 shadow-2xs"
+            >
+              <Activity className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Status Board</span>
+            </Link>
+          </div>
         </div>
 
         <form onSubmit={handleSubmitReport} className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm space-y-4">
