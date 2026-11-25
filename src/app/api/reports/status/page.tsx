@@ -120,7 +120,6 @@ export default function ClientStatusBoardPage() {
   return (
     <main className="min-h-screen bg-slate-50 p-4 sm:p-8 selection:bg-indigo-600 selection:text-white">
       <div className="max-w-3xl mx-auto">
-        {/* Top Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <div>
             <div className="flex items-center gap-2">
@@ -154,7 +153,6 @@ export default function ClientStatusBoardPage() {
           </div>
         </div>
 
-        {/* Summary Metrics */}
         <div className="grid grid-cols-3 gap-3 mb-6">
           <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -176,7 +174,6 @@ export default function ClientStatusBoardPage() {
           </div>
         </div>
 
-        {/* Ticket List */}
         <div className="space-y-3.5">
           {reports.length === 0 ? (
             <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400">
@@ -205,7 +202,6 @@ export default function ClientStatusBoardPage() {
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        {/* Warranty vs Payable Badge */}
                         {isBillable ? (
                           <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
                             <DollarSign className="w-3 h-3" />
@@ -230,7 +226,6 @@ export default function ClientStatusBoardPage() {
                     {getStatusBadge(report.status || "Open")}
                   </div>
 
-                  {/* Payable Scope Details & Sign-Off Action */}
                   {isBillable && (
                     <div className="bg-blue-50/60 border border-blue-200/80 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="text-xs space-y-0.5">
